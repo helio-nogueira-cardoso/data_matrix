@@ -383,6 +383,21 @@ class CorrectionWindow:
                 cr.move_to(tx, ty)
                 cr.show_text(cell.symbol)
 
+    def _crop_cell(self, r, c):
+        """Recorta a celula (r, c) da imagem ortorretificada em resolucao original."""
+        # Encontra a caixa correspondente a celula.
+        for br, bc, x0, y0, x1, y1 in self.boxes:
+            if br == r and bc == c:
+                # Adiciona margem extra para contexto visual.
+                pad = int((x1 - x0) * 0.3)
+                h, w = self.ortho_bgr.shape[:2]
+                px0 = max(0, x0 - pad)
+                py0 = max(0, y0 - pad)
+                px1 = min(w, x1 + pad)
+                py1 = min(h, y1 + pad)
+                return self.ortho_bgr[py0:py1, px0:px1].copy()
+        return None
+
     def _on_click(self, widget, event):
         """Trata o clique: encontra a celula mais proxima e solicita correcao."""
         img_x = event.x / self.scale
@@ -402,13 +417,15 @@ class CorrectionWindow:
         cell = self.cells[best_r][best_c]
         current = cell.symbol if cell.symbol != "-" else ""
 
-        new_val = _ask_string(
+        # Recorta a celula em resolucao original para analise visual.
+        cell_crop = self._crop_cell(best_r, best_c)
+
+        new_val = _ask_correction(
             self.window,
-            "Correcao de Simbolo",
-            f"Celula ({best_r}, {best_c})\n"
-            f"Valor atual: '{current}'\n\n"
-            f"Novo valor (vazio = marcar como vazio):",
-            default=current,
+            row=best_r,
+            col=best_c,
+            current=current,
+            cell_crop_bgr=cell_crop,
         )
 
         if new_val is None:
@@ -490,8 +507,82 @@ def _show_message(parent, title, text, msg_type=Gtk.MessageType.INFO):
     dialog.destroy()
 
 
+def _bgr_to_pixbuf(bgr, target_size=200):
+    """Converte uma imagem BGR (numpy) para GdkPixbuf, escalando para target_size."""
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    h, w, ch = rgb.shape
+    pixbuf = GdkPixbuf.Pixbuf.new_from_data(
+        rgb.tobytes(), GdkPixbuf.Colorspace.RGB, False, 8, w, h, w * ch,
+    )
+    # Escala mantendo proporcao para que o maior lado tenha target_size pixels.
+    scale = target_size / max(w, h)
+    new_w = max(1, int(w * scale))
+    new_h = max(1, int(h * scale))
+    return pixbuf.scale_simple(new_w, new_h, GdkPixbuf.InterpType.BILINEAR)
+
+
+def _ask_correction(parent, row, col, current, cell_crop_bgr):
+    """Dialogo de correcao com imagem ampliada da celula.
+
+    Mostra o recorte ampliado da celula para analise visual,
+    junto com o campo de entrada para o novo valor.
+    Retorna string ou None se cancelado.
+    """
+    dialog = Gtk.Dialog(
+        title="Correcao de Simbolo",
+        transient_for=parent,
+        flags=Gtk.DialogFlags.MODAL,
+    )
+    dialog.add_buttons(
+        Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+        Gtk.STOCK_OK, Gtk.ResponseType.OK,
+    )
+    dialog.set_default_response(Gtk.ResponseType.OK)
+
+    box = dialog.get_content_area()
+    box.set_margin_top(12)
+    box.set_margin_bottom(8)
+    box.set_margin_start(12)
+    box.set_margin_end(12)
+    box.set_spacing(8)
+
+    # Imagem ampliada da celula.
+    if cell_crop_bgr is not None and cell_crop_bgr.size > 0:
+        pixbuf = _bgr_to_pixbuf(cell_crop_bgr, target_size=200)
+        image_widget = Gtk.Image.new_from_pixbuf(pixbuf)
+
+        # Moldura ao redor da imagem.
+        frame = Gtk.Frame()
+        frame.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
+        frame.add(image_widget)
+        box.add(frame)
+
+    # Texto informativo.
+    prompt = (
+        f"Celula ({row}, {col})\n"
+        f"Valor atual: '{current}'\n\n"
+        f"Novo valor (vazio = marcar como vazio):"
+    )
+    label = Gtk.Label(label=prompt)
+    label.set_xalign(0)
+    label.set_line_wrap(True)
+    box.add(label)
+
+    # Campo de entrada.
+    entry = Gtk.Entry()
+    entry.set_text(current)
+    entry.set_activates_default(True)
+    box.add(entry)
+
+    dialog.show_all()
+    response = dialog.run()
+    text = entry.get_text() if response == Gtk.ResponseType.OK else None
+    dialog.destroy()
+    return text
+
+
 def _ask_string(parent, title, prompt, default=""):
-    """Dialogo de entrada de texto. Retorna string ou None se cancelado."""
+    """Dialogo generico de entrada de texto. Retorna string ou None se cancelado."""
     dialog = Gtk.Dialog(
         title=title,
         transient_for=parent,
