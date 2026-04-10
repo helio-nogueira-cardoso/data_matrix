@@ -30,7 +30,7 @@ Responsáveis por:
 
 ## 2. Aplicação gráfica PyAppArq (`PyAppArq/`)
 
-Reescrita em Python da aplicação original AppArq (C++/Qt). Integra o pipeline de visão computacional com a interpretação semântica e exportação para BIM, incluindo:
+Subprojeto Python do AppArq original (C++/Qt), mantido dentro deste repositório e compartilhando a mesma venv. Integra o pipeline de visão computacional com a interpretação semântica e exportação para BIM, incluindo:
 
 * Interface gráfica GTK3 para carregamento de imagens
 * Dois modos de operação: interativo (verificação manual) e automático
@@ -129,7 +129,7 @@ python pipeline.py --dump-elements
 
 ## Pipeline livre (sem grade)
 
-Arquivo: `pipeline_livre.py`
+Arquivo: `pipeline_free.py`
 
 ### Descrição
 
@@ -152,7 +152,7 @@ Arquivo: `pipeline_livre.py`
 ### Uso
 
 ```bash
-python pipeline_livre.py \
+python pipeline_free.py \
   --input imagem.png \
   --template template.png \
   --output ortho.png \
@@ -169,7 +169,7 @@ python pipeline_livre.py \
 ### Debug
 
 ```bash
-python pipeline_livre.py --dump-candidates
+python pipeline_free.py --dump-candidates
 ```
 
 ---
@@ -197,7 +197,8 @@ Reescrita em Python da aplicação original AppArq (C++/Qt), com as seguintes mu
 | `objects_handler.py` | Interpretação semântica (paredes, janelas, portas, mobiliário) |
 | `objetos.json` | Definições dos elementos arquitetônicos |
 | `template.png` | Template dos marcadores de canto |
-| `requirements.txt` | Dependências Python |
+
+As dependências Python do PyAppArq são as mesmas do restante do repositório e estão consolidadas no `requirements.txt` da raiz.
 
 ### Modos de operação
 
@@ -206,11 +207,10 @@ Reescrita em Python da aplicação original AppArq (C++/Qt), com as seguintes mu
 
 ### Uso
 
+Com a `.venv` da raiz ativa (ver seção **Instalação**):
+
 ```bash
 cd PyAppArq
-python3 -m venv --system-site-packages venv
-source venv/bin/activate
-pip install -r requirements.txt
 python main.py
 ```
 
@@ -226,51 +226,43 @@ O projeto salvo contém:
 
 # Instalação
 
-## Sistema (Debian/Ubuntu)
+Todo o repositório — pipelines da raiz **e** PyAppArq — usa uma única venv e um único `requirements.txt`, ambos na raiz do projeto.
+
+## 1. Dependências de sistema (Debian/Ubuntu)
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip libdmtx0t64 libdmtx-dev
+sudo apt install -y \
+  python3 python3-venv python3-pip \
+  libdmtx0t64 libdmtx-dev \
+  python3-gi python3-gi-cairo gir1.2-gtk-3.0
 ```
 
-## Pipelines (raiz do repositório)
+* `libdmtx0t64` / `libdmtx-dev`: biblioteca nativa usada pelo `pylibdmtx`
+* `python3-gi` / `gir1.2-gtk-3.0`: GTK3 e PyGObject para a interface do PyAppArq (não instaláveis via pip)
+
+## 2. Venv única na raiz do repositório
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+cd ECC200Decode
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install --ignore-installed -r requirements.txt
 ```
 
-## PyAppArq
+Notas:
 
-```bash
-cd PyAppArq
-python3 -m venv --system-site-packages venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
+* A flag `--system-site-packages` permite que a venv enxergue o PyGObject/GTK3 do sistema (necessário para o PyAppArq).
+* A flag `--ignore-installed` força a instalação das dependências Python *dentro* da venv mesmo quando já existirem em `~/.local`, mantendo a venv portável.
+* Depois da ativação, tanto `python pipeline.py ...` na raiz quanto `cd PyAppArq && python main.py` usam o mesmo ambiente.
 
-A flag `--system-site-packages` é necessária para acessar o GTK3 (PyGObject) instalado no sistema.
-
----
-
-# requirements.txt
-
-## Raiz (pipelines)
-
-```
-pylibdmtx
-Pillow
-opencv-python
-numpy
-```
-
-## PyAppArq
+## requirements.txt
 
 ```
 opencv-python>=4.5.0
 numpy>=1.20.0
 pylibdmtx>=0.1.10
+Pillow
 setuptools
 ```
 
@@ -292,13 +284,21 @@ pip install opencv-python
 
 ## GTK3 / PyGObject (para PyAppArq)
 
-O PyGObject é instalado via sistema, não via pip:
+O PyGObject não é instalado via pip, e sim via sistema:
 
 ```bash
 sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0
 ```
 
-Ao criar o venv, use `--system-site-packages` para herdar esses pacotes.
+A venv é criada com `--system-site-packages` justamente para herdar esses pacotes do sistema. Se a GUI do PyAppArq falhar com `ModuleNotFoundError: No module named 'gi'`, recrie a venv com essa flag.
+
+## Dependências Python "sumindo" na venv
+
+Se você criou a venv e o `pip install` disse "Requirement already satisfied" para tudo (sem baixar nada), significa que o pip encontrou os pacotes em `~/.local/lib/python3.*/site-packages` por causa do `--system-site-packages`. A venv parece vazia e não é portável. Reinstale forçando:
+
+```bash
+pip install --ignore-installed -r requirements.txt
+```
 
 ---
 
