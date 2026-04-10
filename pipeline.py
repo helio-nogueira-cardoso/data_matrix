@@ -38,7 +38,7 @@ def parse_args():
     p.add_argument(
         "--workers",
         type=int,
-        default=max(1, (os.cpu_count() or 1) - 1),
+        default=max(1, (os.cpu_count() or 1) // 2),
         help="Número de processos paralelos para decodificar tiles",
     )
     p.add_argument("--chunksize", type=int, default=32)
