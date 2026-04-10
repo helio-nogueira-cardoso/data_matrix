@@ -1,0 +1,335 @@
+{
+ 
+    "paredes": {
+        "pintura_branca": {
+            "espessura": 15,
+            "cor": ["cor14"],
+            "tipo": "pintura_branca"
+        },
+
+        "ceramica": {
+            "espessura": 15,
+            "cor": ["cor16"],
+            "tipo": "ceramica"
+        },
+
+        "branca_ceramica": {
+            "espessura": 20,
+            "cor": ["cor20"],
+            "tipo": "branca_ceramica"
+        }
+    },
+
+    "hospedados": {
+        "bacia_sanitaria": {
+            "tipo": "Hospedado",
+            "nome": "H1",
+            "familia": "bacia_sanitaria",
+            "tamanho": 1,
+            "dimensao": [0.36, 0.64],
+            "cor": ["E"] 
+        },  
+    
+        "lavatorio": {
+            "tipo": "Hospedado",
+            "nome": "H2",
+            "familia": "lavatorio",
+            "tamanho": -1,
+            "dimensao": [0.57, 0.425],
+            "cor": ["H"]
+        },
+    
+        "chuveiro": {
+            "tipo": "Hospedado",
+            "nome": "H3",
+            "familia": "chuveiro",
+            "tamanho": -1,
+            "cor": ["P"]
+        },
+    
+        "tanque": {
+            "tipo": "Hospedado",
+            "nome": "H4",
+            "familia": "tanque1",
+            "tamanho": 1,
+            "dimensao": [0.53,0.375],
+            "cor": ["M"]
+        },
+        
+        "pia1": {
+            "tipo": "Hospedado",
+            "nome": "H5",
+            "familia": "pia1",
+            "tamanho": 1.5,
+            "dimensao": [1.5, 0.6],
+            "cor": ["R"]
+        },
+    
+        "pia2": {
+            "tipo": "Hospedado",
+            "nome": "H6",
+            "familia": "pia2",
+            "tamanho": 2,
+            "dimensao": [2, 0.6],
+            "cor": ["S"]
+        }
+    },
+
+    "janelas": {
+        "janela1": {
+            "tipo": "Janela",
+            "nome": "J1",
+            "familia": "janela de correr",
+            "material": "metal e vidro",
+            "dimensao": [1.5,1,1.2],
+            "cor": ["T", "C"]
+        },
+    
+        "janela2": {
+            "tipo": "Janela",
+            "nome": "J2",
+            "familia": "janela de correr",
+            "material": "metal e vidro",
+            "dimensao": [2,1,1.2],
+            "cor": ["T", "E"]
+        },
+    
+        "janela3": {
+            "tipo": "Janela",
+            "nome": "J3",
+            "familia": "janela de correr, veneziana1",
+            "material": "metal e vidro",
+            "dimensao": [1.5,1,1.2],
+            "cor": ["T", "F"]
+        },
+    
+        "janela4": {
+            "tipo": "Janela",
+            "nome": "J4",
+            "familia": "janela de correr, veneziana2",
+            "material": "metal e vidro",
+            "dimensao": [2,1,1.2],
+            "cor": ["T", "G"]
+        },
+    
+        "janela5": {
+            "tipo": "Janela",
+            "nome": "J5",
+            "familia": "janela maxim-ar",
+            "material": "metal e vidro",
+            "dimensao": [0.6,0.6,1.5],
+            "cor": ["T", "H"]
+        }
+    },
+
+    "portas": {
+        "porta1": {
+            "tipo": "Porta",
+            "nome": "P1",
+            "familia": "porta de abrir1",
+            "material": "madeira",
+            "dimensao": [0.8,2.1],
+            "cor": ["T","M"]
+        },
+
+        "porta2": {
+            "tipo": "Porta",
+            "nome": "P2",
+            "familia": "porta de abrir2",
+            "material": "madeira",
+            "dimensao": [0.9,2.1],
+            "cor": ["T","O"]
+        },
+
+        "porta3": {
+            "tipo": "Porta",
+            "nome": "P3",
+            "familia": "porta de abrir3",
+            "material": "metal e vidro",
+            "dimensao": [0.8,2.1],
+            "cor": ["T","P"]
+        },
+
+        "porta4": {
+            "tipo": "Porta",
+            "nome": "P4",
+            "familia": "porta de correr",
+            "material": "metal e vidro",
+            "dimensao": [1.6,2.1],
+            "cor": ["T","R"]
+        }
+    },
+
+    "mobiliario": {
+        "sofa3": {
+            "tipo": "Mobiliario",
+            "nome": "F1",
+            "familia": "sofa3",
+            "cor": ["V", "C"],
+            "dimensao": [1.9,0.9]
+        },
+
+        "sofa2": {
+            "tipo": "Mobiliario",
+            "nome": "F2",
+            "familia": "sofa2",
+            "cor": ["V", "E"],
+            "dimensao": [1.35,0.75]
+        },
+
+        "poltrona": {
+            "tipo": "Mobiliario",
+            "nome": "F3",
+            "familia": "poltrona",
+            "cor": ["V", "H"],
+            "dimensao": [0.72,0.70]
+        },
+
+        "rackTV": {
+            "tipo": "Mobiliario",
+            "nome": "F4",
+            "familia": "rackTV",
+            "cor": ["V", "M"],
+            "dimensao": [1.6,0.45]
+        },
+
+        "mesa_canto": {
+            "tipo": "Mobiliario",
+            "nome": "F5",
+            "familia": "mesa de canto",
+            "cor": ["V", "O"],
+            "dimensao": [1.62,0.388]
+        },
+
+        "mesa_centro": {
+            "tipo": "Mobiliario",
+            "nome": "F6",
+            "familia": "mesa de centro",
+            "cor": ["V", "P"],
+            "dimensao": [0.9,0.54]
+        },
+
+        "mesa_jantar_6": {
+            "tipo": "Mobiliario",
+            "nome": "F7",
+            "familia": "mesa jantar 6 pessoas",
+            "cor": ["V", "R"],
+            "dimensao": [1.36,0.75]
+        },
+
+        "mesa_jantar_4": {
+            "tipo": "Mobiliario",
+            "nome": "F8",
+            "familia": "mesa jantar 4 pessoas",
+            "cor": ["V", "S"],
+            "dimensao": [1.2,0.8]
+        },
+
+        "buffet_aparador": {
+            "tipo": "Mobiliario",
+            "nome": "F9",
+            "familia": "buffet aparador",
+            "cor": ["H", "G"],
+            "dimensao": [1.65,0.41]
+        },
+
+        "fogao_6": {
+            "tipo": "Mobiliario",
+            "nome": "F10",
+            "familia": "Fogão - 6 bocas",
+            "cor": ["H", "C"],
+            "dimensao": [0.76,0.57]
+        },
+
+        "fogao_4": {
+            "tipo": "Mobiliario",
+            "nome": "F11",
+            "familia": "Fogão - 4 bocas",
+            "cor": ["H", "F"],
+            "dimensao": [0.51,0.57]
+        },
+
+        "armario_baixo": {
+            "tipo": "Mobiliario",
+            "nome": "F12",
+            "familia": "Armário de cozinha baixo",
+            "cor": ["H", "E"],
+            "dimensao": [1.2,0.41]
+        },
+
+        "armario_alto": {
+            "tipo": "Mobiliario",
+            "nome": "F13",
+            "familia": "Armário de cozinha alto",
+            "cor": ["H", "M"],
+            "dimensao": [1.21,0.355]
+        },
+
+        "geladeira": {
+            "tipo": "Mobiliario",
+            "nome": "F14",
+            "familia": "Geladeira",
+            "cor": ["H", "O"],
+            "dimensao": [0.62,0.71]
+        },
+
+        "maquina_lavar": {
+            "tipo": "Mobiliario",
+            "nome": "F15",
+            "familia": "Máquina de lavar",
+            "cor": ["H", "P"],
+            "dimensao": [0.6,0.66]
+        },
+
+        "cama_casal": {
+            "tipo": "Mobiliario",
+            "nome": "F16",
+            "familia": "Cama de casal",
+            "cor": ["H", "R"],
+            "dimensao": [1.45,2.02],
+	    "neutral_rotation": 270
+        },
+
+        "cama_solteiro": {
+            "tipo": "Mobiliario",
+            "nome": "F17",
+            "familia": "Cama de solteiro",
+            "cor": ["H", "S"],
+            "dimensao": [0.93,2.02],
+	    "neutral_rotation": 270
+        },
+
+        "mesa_cabeceira": {
+            "tipo": "Mobiliario",
+            "nome": "F18",
+            "familia": "Mesa de cabeceira",
+            "cor": ["E", "M"],
+            "dimensao": [0.42,0.41]
+        },
+
+        "guarda_roupa_4": {
+            "tipo": "Mobiliario",
+            "nome": "F19",
+            "familia": "Guarda roupa - 4 portas",
+            "cor": ["E", "O"],
+            "dimensao": [0.9,0.34]
+        },
+
+        "guarda_roupa_6": {
+            "tipo": "Mobiliario",
+            "nome": "F20",
+            "familia": "Guarda roupa - 6 portas",
+            "cor": ["E", "P"],
+            "dimensao": [1.63,0.43]
+        },
+
+        "mesa_estudo": {
+            "tipo": "Mobiliario",
+            "nome": "F21",
+            "familia": "Mesa de estudos (c/ cadeira e computador)",
+            "cor": ["E", "V"],
+            "dimensao": [1.2,0.45]
+        }
+    }
+
+}
