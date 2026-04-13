@@ -107,7 +107,7 @@ cosméticas como `'N'`, `'I'` ou strings com caracteres de controle (`'H63E'`,
   "version": 1,
   "max_length": 4,
   "vocabulary": [
-    "A","B","E","F","G","H","J",
+    "A","B","C","E","F","G","H","J",
     "M","O","P","R","S","T","V","X",
     "h"
   ]
