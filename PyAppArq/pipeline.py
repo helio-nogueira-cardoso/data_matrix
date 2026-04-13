@@ -7,8 +7,10 @@ com multiplos pre-processamentos, mas retorna dados estruturados em vez de
 escrever arquivos.
 """
 
+import json
 import os
 from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -18,6 +20,51 @@ from pylibdmtx.pylibdmtx import decode
 # Dimensao fixa da grade.
 ROWS = 37
 COLS = 37
+
+
+# ---------------------------------------------------------------------------
+# Vocabulario de simbolos validos (allowlist) carregado do config
+# ---------------------------------------------------------------------------
+
+def _find_symbols_config():
+    """Procura symbols_config.json em locais usuais.
+
+    Tenta primeiro o diretorio deste arquivo, depois sobe um nivel para
+    ECC200Decode/. Devolve None se nenhum encontrado.
+    """
+    here = Path(__file__).resolve().parent
+    for cand in (here / "symbols_config.json", here.parent / "symbols_config.json"):
+        if cand.exists():
+            return cand
+    return None
+
+
+def load_symbols_config(path=None):
+    """Carrega o JSON de allowlist de simbolos.
+
+    Retorna dict com vocabulary (frozenset|None) e max_length (int). Em caso
+    de erro de leitura devolve um config permissivo (qualquer letra ASCII).
+
+    Esse config e um artefato de producao: contem so o vocabulario do projeto.
+    Gabaritos de teste (multiset esperado para um lote especifico de fotos)
+    vivem separados, em ECC200Decode/tests/expected_*.json, e nao passam por
+    esta funcao.
+    """
+    config_path = Path(path) if path else _find_symbols_config()
+    if config_path is None:
+        return {"vocabulary": None, "max_length": 4}
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"vocabulary": None, "max_length": 4}
+    vocab = raw.get("vocabulary")
+    return {
+        "vocabulary": frozenset(vocab) if vocab else None,
+        "max_length": int(raw.get("max_length", 4)),
+    }
+
+
+SYMBOLS_CONFIG = load_symbols_config()
 
 
 # ---------------------------------------------------------------------------
@@ -124,11 +171,18 @@ def _validate_corners(corners, img_shape):
         )
 
 
-def build_ortho(image_bgr, template_bgr, margin):
+def build_ortho(image_bgr, template_bgr, margin=None):
     """Ortorretifica usando template matching nos 4 cantos + warp perspectivo.
+
+    Se margin=None (padrao), a margem e calculada automaticamente como
+    ceil(metade do menor passo da grade 37x37). Isso garante que todas as
+    celulas — inclusive as de canto — tenham recorte de tamanho nominal
+    sem truncamento pela borda da imagem.
 
     Levanta OrthoError se os cantos nao podem ser encontrados ou sao invalidos.
     """
+    import math
+
     gray_image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     gray_template = cv2.cvtColor(template_bgr, cv2.COLOR_BGR2GRAY)
     th, tw = gray_template.shape[:2]
@@ -140,20 +194,24 @@ def build_ortho(image_bgr, template_bgr, margin):
 
     _validate_corners(corners, image_bgr.shape)
 
-    m = max(0, int(margin))
     tl, tr, br, bl = corners
     width = int(round(max(np.linalg.norm(tr - tl), np.linalg.norm(br - bl))))
     height = int(round(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr))))
     width = max(1, width)
     height = max(1, height)
 
-    # Retangulo destino ja com margem embutida.
+    if margin is None:
+        step = min(width / (COLS - 1), height / (ROWS - 1))
+        margin = int(math.ceil(step / 2.0))
+    m = max(0, int(margin))
+
     destination = np.array(
         [[m, m], [m + width, m], [m + width, m + height], [m, m + height]],
         dtype=np.float32,
     )
     H = cv2.getPerspectiveTransform(corners, destination)
-    return cv2.warpPerspective(image_bgr, H, (width + 2 * m, height + 2 * m))
+    ortho = cv2.warpPerspective(image_bgr, H, (width + 2 * m, height + 2 * m))
+    return ortho, m
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +224,13 @@ def clamp_int(v, lo, hi):
 
 
 def compute_grid_boxes(height, width, margin, rows=ROWS, cols=COLS):
-    """Calcula as caixas retangulares de cada celula da grade 37x37."""
+    """Calcula as caixas retangulares de cada celula da grade 37x37.
+
+    A grade e distribuida uniformemente entre as margens. Como a base
+    perfurada tem espacamento perfeitamente regular, o calculo nominal
+    (half_side = metade do menor passo) ja produz caixas que contem o
+    simbolo centralizado por inteiro.
+    """
     m = float(max(0, int(margin)))
     step_x = (width - 2.0 * m) / (cols - 1)
     step_y = (height - 2.0 * m) / (rows - 1)
@@ -219,27 +283,141 @@ def try_decode_text(img, timeout, shrink, min_edge=None, max_edge=None):
     return None
 
 
+def looks_like_valid_symbol(text, vocabulary=None, max_length=None):
+    """Valida se o texto decodificado parece um codigo de simbolo real.
+
+    Rejeita corrupcoes tipicas do libdmtx em imagens rotacionadas (sequencias
+    como "H63E", "l07E", "V\\x02E", "P07\\x05" — letra real seguida de digitos
+    ou caracteres de controle). Simbolos legitimos sao curtos, ASCII e alfa.
+
+    Quando um vocabulario (allowlist) e fornecido, exige tambem que o texto
+    esteja contido nele. Isso filtra leituras espurias como "N", "I" e outras
+    letras que escapariam apenas pela checagem de isalpha().
+    """
+    if vocabulary is None:
+        vocabulary = SYMBOLS_CONFIG.get("vocabulary")
+    if max_length is None:
+        max_length = SYMBOLS_CONFIG.get("max_length", 4)
+
+    if not text:
+        return False
+    if len(text) > max_length:
+        return False
+    if not (text.isascii() and text.isalpha()):
+        return False
+    if vocabulary is not None and text not in vocabulary:
+        return False
+    return True
+
+
 def tile_looks_empty(gray, std_threshold=7.0, dark_threshold=0.06):
-    """Heuristica para decidir se um tile parece vazio."""
+    """Heuristica para decidir se um tile parece vazio.
+
+    Faz early-exit no desvio padrao, evitando calcular dark_ratio na grande
+    maioria das celulas vazias (fundo uniforme). Em seguida valida a razao
+    de pixels escuros como segunda condicao.
+    """
+    if gray.size < 16:
+        return True
     std = float(gray.std())
-    dark_ratio = float(np.mean(gray < 180))
-    return std < std_threshold or dark_ratio < dark_threshold
+    if std < std_threshold:
+        return True
+    dark_ratio = float(np.count_nonzero(gray < 180)) / float(gray.size)
+    return dark_ratio < dark_threshold
+
+
+def refine_tile_box(gray, x0, y0, x1, y1, max_shift):
+    """Move a caixa para o componente escuro mais denso proximo ao centro.
+
+    Util quando a ortorretificacao esta quase, mas nao perfeitamente, alinhada
+    ao simbolo. Mantem o tamanho da caixa original e so translada.
+    Retorna a caixa original se nao houver candidato plausivel.
+    """
+    if max_shift <= 0:
+        return x0, y0, x1, y1
+
+    h, w = gray.shape[:2]
+    bw = x1 - x0
+    bh = y1 - y0
+    if bw <= 0 or bh <= 0:
+        return x0, y0, x1, y1
+
+    sx0 = max(0, x0 - max_shift)
+    sy0 = max(0, y0 - max_shift)
+    sx1 = min(w, x1 + max_shift)
+    sy1 = min(h, y1 + max_shift)
+    region = gray[sy0:sy1, sx0:sx1]
+    if region.size == 0 or region.std() < 8.0:
+        return x0, y0, x1, y1
+
+    _, mask = cv2.threshold(region, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    n, _labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if n < 2:
+        return x0, y0, x1, y1
+
+    ocx = (x0 + bw / 2.0) - sx0
+    ocy = (y0 + bh / 2.0) - sy0
+
+    box_area = float(bw * bh)
+    min_area = box_area * 0.05
+    max_area = box_area * 1.10
+    max_dist = max_shift * 1.5
+
+    best = None
+    best_score = -1.0
+    for i in range(1, n):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area < min_area or area > max_area:
+            continue
+        cx, cy = centroids[i]
+        dist = float(np.hypot(cx - ocx, cy - ocy))
+        if dist > max_dist:
+            continue
+        score = float(area) - dist * 10.0
+        if score > best_score:
+            best_score = score
+            best = (cx, cy)
+
+    if best is None:
+        return x0, y0, x1, y1
+
+    cx_full = sx0 + best[0]
+    cy_full = sy0 + best[1]
+    nx0 = max(0, min(w - bw, int(round(cx_full - bw / 2.0))))
+    ny0 = max(0, min(h - bh, int(round(cy_full - bh / 2.0))))
+    return nx0, ny0, nx0 + bw, ny0 + bh
 
 
 def build_candidates_and_bounds(tile_gray, border=10, resize_factor=2.0,
                                 use_edge_bounds=False):
     """Gera imagens candidatas para o decodificador.
 
-    Ordem de prioridade: otsu, sharp, gray.
+    Ordem, do mais provavel para o mais caro:
+      1. otsu       - contraste realcado + Otsu (caminho padrao).
+      2. otsu_bil   - Otsu apos filtro bilateral (simbolos com ruido).
+      3. adaptive   - limiar adaptativo Gaussiano (iluminacao nao uniforme).
+      4. sharp      - versao cinza com sharpening.
+      5. gray       - tile original so redimensionado (ultimo recurso).
     """
-    # Ampliacao do tile para facilitar a leitura.
+    if tile_gray is None or tile_gray.size == 0:
+        return [], None, None
+
+    h_t, w_t = tile_gray.shape[:2]
+    if h_t < 4 or w_t < 4:
+        return [], None, None
+
+    # Tiles muito pequenos se beneficiam de ampliacao extra.
+    rf = float(resize_factor)
+    if min(h_t, w_t) < 60:
+        rf = max(rf, 3.0)
+
     gray_up = cv2.resize(
         tile_gray, None,
-        fx=resize_factor, fy=resize_factor,
+        fx=rf, fy=rf,
         interpolation=cv2.INTER_CUBIC,
     )
 
-    # Melhora contraste local.
+    # Realce de contraste local.
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray_up)
 
@@ -247,11 +425,25 @@ def build_candidates_and_bounds(tile_gray, border=10, resize_factor=2.0,
     blur = cv2.GaussianBlur(enhanced, (0, 0), 0.8)
     sharp = cv2.addWeighted(enhanced, 1.5, blur, -0.5, 0)
 
-    # Binarizacao automatica com Otsu.
+    # Otsu sobre a versao realcada (caminho campeao).
     _, otsu = cv2.threshold(sharp, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Caminho alternativo: bilateral preserva bordas e suprime ruido.
+    bilateral = cv2.bilateralFilter(gray_up, 5, 40, 40)
+    _, otsu_bil = cv2.threshold(bilateral, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Limiar adaptativo para iluminacao heterogenea.
+    block_size = max(11, (min(gray_up.shape[:2]) // 6) | 1)
+    adaptive = cv2.adaptiveThreshold(
+        gray_up, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
+        block_size, 4,
+    )
 
     candidates = [
         ("otsu", add_white_border(otsu, border)),
+        ("otsu_bil", add_white_border(otsu_bil, border)),
+        ("adaptive", add_white_border(adaptive, border)),
         ("sharp", add_white_border(sharp, border)),
         ("gray", add_white_border(gray_up, border)),
     ]
@@ -281,8 +473,44 @@ def decode_datamatrix_gray(tile_gray, timeout=40, shrink=2, border=10,
     for method, img in candidates:
         text = try_decode_text(img, timeout=timeout, shrink=shrink,
                                min_edge=min_edge, max_edge=max_edge)
-        if text is not None:
+        if text is not None and looks_like_valid_symbol(text):
             return text, method
+
+    # Fallback legitimo: simbolos colocados manualmente na maquete podem cair
+    # ligeiramente fora do centro da celula. Recortar o centro da celula com
+    # um pouco menos de margem reduz a vizinhanca ruidosa e as vezes faz o
+    # decoder achar o simbolo. Variamos apenas o tamanho da janela ao redor
+    # do mesmo conteudo — sem rotacao.
+    tile_std = float(tile_gray.std())
+    if tile_std < 18.0:
+        return None, None
+
+    h, w = tile_gray.shape[:2]
+    if min(h, w) < 16:
+        return None, None
+
+    # Tres niveis de crop central — 75%, 65% e 55% do lado original — cobrem
+    # misalinhamentos suaves, medios e fortes sem explodir o custo.
+    for shrink_ratio in (0.75, 0.65, 0.55):
+        nh = int(round(h * shrink_ratio))
+        nw = int(round(w * shrink_ratio))
+        if nh < 12 or nw < 12 or nh >= h or nw >= w:
+            continue
+        y0 = (h - nh) // 2
+        x0 = (w - nw) // 2
+        cropped = tile_gray[y0:y0 + nh, x0:x0 + nw]
+        if cropped.size == 0:
+            continue
+        sub_cands, mn, mx = build_candidates_and_bounds(
+            cropped, border=border, resize_factor=resize_factor,
+            use_edge_bounds=use_edge_bounds,
+        )
+        for method, img in sub_cands:
+            text = try_decode_text(img, timeout=timeout, shrink=shrink,
+                                   min_edge=mn, max_edge=mx)
+            if text is not None and looks_like_valid_symbol(text):
+                return text, f"{method}_c{int(shrink_ratio * 100)}"
+
     return None, None
 
 
@@ -301,19 +529,29 @@ def _decode_worker(job):
     return r, c, text if text is not None else "?"
 
 
-def decode_grid(ortho_bgr, margin, decode_timeout=40, decode_shrink=2,
+def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
                 decode_border=10, resize_factor=2.0, workers=None,
-                chunksize=32, skip_empty=True, use_edge_bounds=False):
+                chunksize=16, skip_empty=True, use_edge_bounds=False,
+                refine_cells=False, refine_max_shift=0):
     """Decodifica a grade 37x37 completa. Retorna lista 2D de simbolos."""
     if workers is None:
-        workers = max(1, (os.cpu_count() or 1) // 2)
+        workers = max(1, (os.cpu_count() or 1) - 1)
 
     height, width = ortho_bgr.shape[:2]
     ortho_gray = cv2.cvtColor(ortho_bgr, cv2.COLOR_BGR2GRAY)
     boxes = compute_grid_boxes(height, width, margin)
 
+    if refine_cells and refine_max_shift <= 0 and boxes:
+        _, _, bx0, by0, bx1, by1 = boxes[0]
+        cell_side = max(1, min(bx1 - bx0, by1 - by0))
+        refine_max_shift = max(4, int(round(cell_side * 0.30)))
+
     jobs = []
     for r, c, x0, y0, x1, y1 in boxes:
+        if refine_cells and refine_max_shift > 0:
+            x0, y0, x1, y1 = refine_tile_box(
+                ortho_gray, x0, y0, x1, y1, refine_max_shift,
+            )
         tile_gray = crop_box(ortho_gray, x0, y0, x1, y1)
         jobs.append((r, c, tile_gray, decode_timeout, decode_shrink,
                      decode_border, resize_factor, skip_empty, use_edge_bounds))
@@ -326,6 +564,8 @@ def decode_grid(ortho_bgr, margin, decode_timeout=40, decode_shrink=2,
             r, c, value = _decode_worker(job)
             grid[r][c] = value
     else:
+        # Processos em vez de threads: o libdmtx mantem estado interno nao
+        # projetado para acesso concorrente por threads.
         with ProcessPoolExecutor(max_workers=workers) as ex:
             for r, c, value in ex.map(_decode_worker, jobs, chunksize=chunksize):
                 grid[r][c] = value
@@ -337,10 +577,11 @@ def decode_grid(ortho_bgr, margin, decode_timeout=40, decode_shrink=2,
 # API de alto nivel
 # ---------------------------------------------------------------------------
 
-def process_image(image_path, template_path, margin=60, decode_timeout=40,
+def process_image(image_path, template_path, margin=None, decode_timeout=60,
                   decode_shrink=2, decode_border=10, resize_factor=2.0,
-                  workers=None, chunksize=32, skip_empty=True,
-                  use_edge_bounds=False, progress_callback=None):
+                  workers=None, chunksize=16, skip_empty=True,
+                  use_edge_bounds=False, refine_cells=False,
+                  refine_max_shift=0, progress_callback=None):
     """Executa o pipeline completo sobre uma imagem.
 
     Args:
@@ -367,7 +608,7 @@ def process_image(image_path, template_path, margin=60, decode_timeout=40,
         raise RuntimeError(f"Falha ao abrir template: {template_path}")
 
     _progress("Ortorretificando...")
-    ortho = build_ortho(image, template, margin)
+    ortho, margin = build_ortho(image, template, margin)
 
     _progress("Decodificando grade 37x37...")
     grid = decode_grid(
@@ -380,6 +621,8 @@ def process_image(image_path, template_path, margin=60, decode_timeout=40,
         chunksize=chunksize,
         skip_empty=skip_empty,
         use_edge_bounds=use_edge_bounds,
+        refine_cells=refine_cells,
+        refine_max_shift=refine_max_shift,
     )
 
     height, width = ortho.shape[:2]

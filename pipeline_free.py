@@ -171,7 +171,13 @@ import numpy as np
 # - build_candidates_and_bounds: monta variações de ROI para decodificação
 # - try_decode_text: tenta decodificar um DataMatrix
 # - tile_looks_empty: tenta identificar ROIs vazias
-from pipeline import build_ortho, build_candidates_and_bounds, try_decode_text, tile_looks_empty
+from pipeline import (
+    build_ortho,
+    build_candidates_and_bounds,
+    try_decode_text,
+    tile_looks_empty,
+    looks_like_valid_symbol,
+)
 
 # Quantidade de linhas e colunas usadas como referência de escala.
 ROWS = 37
@@ -209,7 +215,11 @@ def parse_args():
     # =========================
     # Parâmetros do decoder
     # =========================
-    p.add_argument("--decode-timeout", type=int, default=2000)
+    # timeout em ms por tentativa de decodificação. O libdmtx resolve imagens
+    # saudáveis em <30 ms; tiles limítrofes precisam de mais folga,
+    # especialmente quando os workers estão competindo por CPU. 80 ms cobre
+    # o caso comum sem inflar demais o tempo em tiles impossíveis.
+    p.add_argument("--decode-timeout", type=int, default=80)
     p.add_argument("--decode-shrink", type=int, default=2)
     p.add_argument("--decode-border", type=int, default=10)
     p.add_argument("--resize-factor", type=float, default=2.0)
@@ -219,12 +229,19 @@ def parse_args():
     # Paralelismo
     # =========================
     p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 1) - 1))
-    p.add_argument("--chunksize", type=int, default=8)
+    # chunksize maior reduz drasticamente o overhead de IPC quando o número de
+    # candidatos é grande (375+); mantém os workers ocupados.
+    p.add_argument("--chunksize", type=int, default=32)
 
     # =========================
     # Proposição de candidatos
     # =========================
     p.add_argument("--proposal-scale", type=float, default=0.70)
+    # Lista de escalas extras para multi-pass de proposição. Vazia por padrão:
+    # a escala 0.70 cobre o caso comum e a fase 2 (pad apertado + rotações) do
+    # decodificador resolve os tiles que escapam. Mantida como flag para
+    # depuração e para imagens fora do conjunto de treinamento.
+    p.add_argument("--proposal-scales", default="")
     p.add_argument("--max-candidates", type=int, default=20000)
     p.add_argument("--max-candidates-per-family", type=int, default=200)
     p.add_argument("--nms-iou", type=float, default=0.30)
@@ -238,6 +255,15 @@ def parse_args():
     p.add_argument("--empty-std-threshold", type=float, default=7.0)
     p.add_argument("--empty-dark-threshold", type=float, default=0.05)
     p.add_argument("--min-local-dark-ratio", type=float, default=0.025)
+
+    # =========================
+    # Padding na borda do ortho
+    # =========================
+    # Quando símbolos ficam encostados no topo (y=0) ou em qualquer borda do
+    # ortho — acontece quando os marcadores de canto não cobrem toda a área de
+    # interesse — o heatmap perde contexto e a proposta deixa o símbolo de fora.
+    # Pré-padder com branco resolve sem mexer na homografia.
+    p.add_argument("--edge-pad", type=int, default=80)
 
     # =========================
     # Escala típica do símbolo
@@ -384,7 +410,7 @@ def nms_candidates(candidates, nms_iou, merge_distance, max_keep=None):
     return out
 
 
-def estimate_symbol_side(gray, margin, rows, cols):
+def estimate_symbol_side(gray, margin, rows, cols, ref_shape=None):
     """
     Estima o lado típico de um símbolo na imagem ortorretificada.
 
@@ -393,8 +419,16 @@ def estimate_symbol_side(gray, margin, rows, cols):
     aproximado dos símbolos.
 
     Isso ajuda a escolher janelas plausíveis na etapa de proposição.
+
+    Quando ``ref_shape`` é informado (formato (h, w)), ele substitui o shape
+    real do ``gray``. É usado quando o gray foi pré-padded com uma borda
+    branca para detecção de símbolos de borda — nesse caso o tamanho do
+    símbolo deve continuar baseado no ortho original, não no padded.
     """
-    h, w = gray.shape[:2]
+    if ref_shape is not None:
+        h, w = ref_shape[:2]
+    else:
+        h, w = gray.shape[:2]
 
     step_x = max(4.0, (w - 2.0 * margin) / max(1, cols - 1))
     step_y = max(4.0, (h - 2.0 * margin) / max(1, rows - 1))
@@ -444,7 +478,7 @@ def local_score_map(gray_small):
     return score
 
 
-def propose_from_heatmap(gray, args):
+def propose_from_heatmap(gray, args, ref_shape=None):
     """
     Gera candidatos usando um heatmap local.
 
@@ -475,7 +509,9 @@ def propose_from_heatmap(gray, args):
     sh, sw = small.shape[:2]
 
     # Estima o lado típico do símbolo na imagem original e adapta para a escala reduzida
-    est_side_full = estimate_symbol_side(gray, args.margin, args.rows, args.cols)
+    est_side_full = estimate_symbol_side(
+        gray, args.margin, args.rows, args.cols, ref_shape=ref_shape,
+    )
     est_side_small = max(6.0, est_side_full * scale)
 
     # Gera diferentes tamanhos de janela a partir de razões multiplicativas
@@ -550,7 +586,7 @@ def propose_from_heatmap(gray, args):
     return candidates
 
 
-def propose_from_components(gray, args):
+def propose_from_components(gray, args, ref_shape=None):
     """
     Gera candidatos a partir de componentes conectados / contornos.
 
@@ -593,7 +629,9 @@ def propose_from_components(gray, args):
     }
 
     # Define faixa plausível de tamanho do símbolo nessa escala
-    est_side_small = estimate_symbol_side(gray, args.margin, args.rows, args.cols) * scale
+    est_side_small = estimate_symbol_side(
+        gray, args.margin, args.rows, args.cols, ref_shape=ref_shape,
+    ) * scale
     min_side = max(5, int(round(est_side_small * 0.40)))
     max_side = max(min_side + 2, int(round(est_side_small * 1.80)))
 
@@ -655,34 +693,36 @@ def decode_candidate_from_box(gray, box, args):
     """
     Tenta decodificar um único candidato.
 
-    Fluxo:
-        1. Expande a caixa para adicionar contexto
-        2. Descarta regiões vazias
-        3. Gera versões pré-processadas da ROI
-        4. Tenta decodificar cada versão
-        5. Retorna o primeiro sucesso
+    Estratégia em duas fases para equilibrar tempo e recall:
 
-    Retorno:
-        Dicionário com texto, método, caixa e centro,
-        ou None se não conseguir decodificar.
+    Fase 1 — pad nominal: usa o pad dinâmico baseado no tamanho do box e
+    varre todos os pré-processamentos (otsu/otsu_bil/adaptive/sharp/gray).
+    Cobre quase todos os tiles "saudáveis".
+
+    Fase 2 — pad apertado, só rodada se a fase 1 falhou e o tile parece ter
+    conteúdo real (heurística cheap baseada em std e dark_ratio). Símbolos
+    cuja vizinhança contém ruído ou um símbolo adjacente decodificam melhor
+    com pad menor. Aqui usamos todos os pré-processamentos.
+
+    Cada caixa é decodificada apenas na orientação em que aparece no ortho —
+    não rotacionamos o tile como fallback. Rotacionar o tile seria explorar
+    a falta de invariância de rotação interna do libdmtx em casos limítrofes,
+    quebrando a premissa de que cada imagem deve ser processada na sua
+    orientação real.
+
+    Retorna o primeiro acerto válido pelo allowlist; None caso contrário.
     """
     h, w = gray.shape[:2]
+    base_pad = max(args.pad, int(0.12 * min(box[2], box[3])))
 
-    # Padding dinâmico:
-    # cresce junto com o símbolo, mas nunca fica menor que args.pad
-    dynamic_pad = max(args.pad, int(0.12 * min(box[2], box[3])))
-
-    x, y, bw, bh = expand_box(box, dynamic_pad, w, h)
+    # ---- Fase 1: caixa expandida pelo pad nominal -------------------------
+    x, y, bw, bh = expand_box(box, base_pad, w, h)
     tile_gray = gray[y:y + bh, x:x + bw]
-
     if tile_gray.size == 0:
         return None
 
-    # Descarte rápido de ROIs vazias
     if args.skip_empty and tile_looks_empty(
-        tile_gray,
-        args.empty_std_threshold,
-        args.empty_dark_threshold,
+        tile_gray, args.empty_std_threshold, args.empty_dark_threshold,
     ):
         return None
 
@@ -690,7 +730,6 @@ def decode_candidate_from_box(gray, box, args):
     if local_dark_ratio < args.min_local_dark_ratio:
         return None
 
-    # Gera imagens candidatas (gray, otsu, sharp etc.) e limites auxiliares
     candidate_imgs, min_edge, max_edge = build_candidates_and_bounds(
         tile_gray,
         border=args.decode_border,
@@ -698,7 +737,6 @@ def decode_candidate_from_box(gray, box, args):
         use_edge_bounds=args.use_edge_bounds,
     )
 
-    # Tenta decodificar cada pré-processamento
     for method, img in candidate_imgs:
         text = try_decode_text(
             img,
@@ -707,13 +745,52 @@ def decode_candidate_from_box(gray, box, args):
             min_edge=min_edge,
             max_edge=max_edge,
         )
-        if text is not None:
+        if text is not None and looks_like_valid_symbol(text):
             return {
                 "text": text,
                 "method": method,
                 "box": [int(x), int(y), int(bw), int(bh)],
                 "center": [float(x + bw / 2.0), float(y + bh / 2.0)],
             }
+
+    # Decide se vale a pena pagar as tentativas extras: só se o tile parece
+    # ter conteúdo real (alto contraste interno). Tiles ruidosos com pouca
+    # estrutura quase nunca decodificam mesmo com todas as variações.
+    tile_std = float(tile_gray.std())
+    if tile_std < 18.0 or local_dark_ratio < 0.04:
+        return None
+
+    # ---- Fase 2: pad apertado com todos os pré-processamentos.
+    # Símbolos cuja vizinhança contém ruído ou um símbolo adjacente decodificam
+    # melhor com pad menor. Como esta fase só roda em tiles "promissores"
+    # (filtro acima), o custo agregado fica controlado.
+    tight_pad = max(2, base_pad // 2)
+    if tight_pad != base_pad:
+        ax, ay, aw, ah = expand_box(box, tight_pad, w, h)
+        if aw > 0 and ah > 0:
+            alt_tile = gray[ay:ay + ah, ax:ax + aw]
+            if alt_tile.size > 0:
+                alt_imgs, mn2, mx2 = build_candidates_and_bounds(
+                    alt_tile,
+                    border=args.decode_border,
+                    resize_factor=args.resize_factor,
+                    use_edge_bounds=args.use_edge_bounds,
+                )
+                for method, img in alt_imgs:
+                    text = try_decode_text(
+                        img,
+                        timeout=args.decode_timeout,
+                        shrink=args.decode_shrink,
+                        min_edge=mn2,
+                        max_edge=mx2,
+                    )
+                    if text is not None and looks_like_valid_symbol(text):
+                        return {
+                            "text": text,
+                            "method": f"{method}_tight",
+                            "box": [int(ax), int(ay), int(aw), int(ah)],
+                            "center": [float(ax + aw / 2.0), float(ay + ah / 2.0)],
+                        }
 
     return None
 
@@ -833,17 +910,58 @@ def main():
         raise RuntimeError("Falha ao abrir input/template")
 
     # Etapa 1: ortorretificação
-    ortho = build_ortho(image, template, args.margin)
+    ortho, _margin = build_ortho(image, template, args.margin)
     if not cv2.imwrite(args.output, ortho):
         raise RuntimeError("Falha ao salvar ortho")
 
     # Conversão para tons de cinza para facilitar as etapas seguintes
-    gray = cv2.cvtColor(ortho, cv2.COLOR_BGR2GRAY)
+    gray_orig = cv2.cvtColor(ortho, cv2.COLOR_BGR2GRAY)
+    oh, ow = gray_orig.shape[:2]
 
-    # Etapa 2: proposição de candidatos por múltiplas estratégias
+    # Adiciona uma borda branca artificial em volta do ortho. Isso garante que
+    # símbolos colados às bordas (que aparecem em y=0 ou x=W-1, por exemplo
+    # quando a maquete é fotografada rotacionada) tenham contexto suficiente
+    # para o heatmap detectá-los e para o decoder ter quiet zone. As coordenadas
+    # finais são corrigidas no momento de salvar o JSON e desenhar a imagem
+    # anotada. O tamanho do símbolo continua sendo estimado a partir do ortho
+    # original, ignorando a borda artificial — caso contrário a janela do
+    # heatmap cresce e estima caixas grandes demais.
+    pad = max(0, int(args.edge_pad))
+    if pad > 0:
+        # Branco puro cria uma borda dura preto/branco que o blackhat realça
+        # como pseudo-feature, dominando o NMS perto das bordas. Replicar a
+        # borda mantém a estatística local sem introduzir gradiente artificial.
+        gray = cv2.copyMakeBorder(
+            gray_orig, pad, pad, pad, pad,
+            cv2.BORDER_REPLICATE,
+        )
+        ortho_padded = cv2.copyMakeBorder(
+            ortho, pad, pad, pad, pad,
+            cv2.BORDER_REPLICATE,
+        )
+    else:
+        gray = gray_orig
+        ortho_padded = ortho
+
+    # Etapa 2: proposição de candidatos por múltiplas estratégias.
+    # Forçamos a estimativa de tamanho de símbolo a usar as dimensões do ortho
+    # original (sem o edge_pad) para que a janela do heatmap não cresça quando
+    # adicionarmos a borda branca.
     raw_candidates = []
-    raw_candidates.extend(propose_from_heatmap(gray, args))
-    raw_candidates.extend(propose_from_components(gray, args))
+    scales = [args.proposal_scale]
+    extra = [
+        float(s) for s in args.proposal_scales.split(",") if s.strip()
+    ]
+    for s in extra:
+        if all(abs(s - existing) > 1e-6 for existing in scales):
+            scales.append(s)
+    for scale in scales:
+        # Cria uma cópia mínima do args com proposal_scale ajustada para esta
+        # rodada. Mantém todos os outros parâmetros originais.
+        scale_args = argparse.Namespace(**vars(args))
+        scale_args.proposal_scale = scale
+        raw_candidates.extend(propose_from_heatmap(gray, scale_args, ref_shape=(oh, ow)))
+        raw_candidates.extend(propose_from_components(gray, scale_args, ref_shape=(oh, ow)))
 
     # Etapa 3: NMS global para reduzir redundância entre as duas famílias
     candidates = nms_candidates(
@@ -879,11 +997,32 @@ def main():
             if r is not None:
                 decoded.append(r)
     else:
-        # Modo paralelo
+        # Modo paralelo com processos. O libdmtx mantém estado interno não
+        # projetado para acesso concorrente por threads.
         with ProcessPoolExecutor(max_workers=args.workers) as ex:
             for r in ex.map(decode_worker, payloads, chunksize=args.chunksize):
                 if r is not None:
                     decoded.append(r)
+
+    # Etapa 4.5: corrige coordenadas para o sistema do ortho original
+    # (descontando a borda artificial adicionada antes da proposição).
+    if pad > 0:
+        oh, ow = gray_orig.shape[:2]
+        for r in decoded:
+            x, y, bw, bh = r["box"]
+            x -= pad
+            y -= pad
+            # Clampa caixa para dentro do ortho original — caixas que ficam
+            # parcialmente fora do ortho são "encolhidas" mas mantidas.
+            nx = max(0, min(ow - 1, x))
+            ny = max(0, min(oh - 1, y))
+            nx2 = max(nx + 1, min(ow, x + bw))
+            ny2 = max(ny + 1, min(oh, y + bh))
+            r["box"] = [int(nx), int(ny), int(nx2 - nx), int(ny2 - ny)]
+            r["center"] = [
+                float(r["center"][0] - pad),
+                float(r["center"][1] - pad),
+            ]
 
     # Etapa 5: remoção de duplicatas
     decoded = deduplicate_decoded(decoded)
@@ -892,13 +1031,15 @@ def main():
     decoded.sort(key=lambda d: (d["center"][1], d["center"][0]))
 
     # Debug opcional: salvar candidatos recortados
+    # As coordenadas dos candidatos estão no sistema do gray padded, então
+    # recortamos do ortho_padded para garantir consistência.
     if args.dump_candidates:
         out_dir = Path(args.candidates_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
         for idx, cand in enumerate(candidates):
             x, y, w, h = cand["box"]
-            roi = ortho[y:y + h, x:x + w]
+            roi = ortho_padded[y:y + h, x:x + w]
             if roi.size:
                 cv2.imwrite(
                     str(out_dir / f"cand_{idx:04d}_{cand['source']}_{cand['score']:.1f}.png"),
