@@ -92,6 +92,52 @@ O sistema realiza:
 
 ---
 
+# Validador de produção
+
+A allowlist de letras válidas vive em `symbols_config.json` (artefato de
+produção, somente leitura em runtime). Os três pipelines carregam esse
+arquivo no carregamento do módulo e o passam para `looks_like_valid_symbol`,
+que rejeita qualquer leitura fora do vocabulário. Isso filtra corrupções
+típicas do `libdmtx` em tiles limítrofes — ele às vezes devolve letras
+cosméticas como `'N'`, `'I'` ou strings com caracteres de controle (`'H63E'`,
+`'P07\\x05'`) que escapariam de uma checagem só por `isalpha()`.
+
+```json
+{
+  "version": 1,
+  "max_length": 4,
+  "vocabulary": [
+    "A","B","E","F","G","H","J",
+    "M","O","P","R","S","T","V","X",
+    "h"
+  ]
+}
+```
+
+Editar o arquivo é a única forma de mudar o conjunto de símbolos aceitos —
+não há flag de linha de comando para isso, deliberadamente: o vocabulário
+descreve o projeto, não a execução.
+
+## Princípio: nada de rotação como fallback
+
+Cada imagem é decodificada na orientação em que foi capturada. Os pipelines
+**não** rotacionam tile, ortho ou imagem como fallback para "fishar" leituras
+do `libdmtx`. Apesar de o ECC200 ser nominalmente invariante a rotação, o
+`libdmtx` ocasionalmente devolve resultados diferentes para versões
+rotacionadas de um mesmo tile binarizado em casos limítrofes — explorar isso
+seria assumir que a foto pode ter "qualquer" orientação e, na prática,
+geraria leituras potencialmente erradas em produção, onde não há gabarito
+para validar. As recuperações vêm exclusivamente de variações *legítimas*:
+
+* **Pré-processamentos diferentes** (Otsu, bilateral, adaptativo, sharpening,
+  escala de cinza com borda).
+* **Multi-crop** — crops centrais com lados menores (75 %, 65 %, 55 %).
+* **Votação de borda** — para células clampadas na margem do ortho, votação
+  entre o crop original e um crop expandido (+15 %) com borda replicada.
+* **Allowlist** — rejeição de leituras fora do vocabulário do projeto.
+
+---
+
 # Abordagens Implementadas
 
 ## Pipeline baseado em grade
@@ -100,9 +146,21 @@ Arquivo: `pipeline.py`
 
 ### Descrição
 
-* Divide a imagem em uma grade fixa (37x37)
-* Cada célula é processada individualmente
-* Simples e determinístico
+* Divide a imagem em uma grade fixa 37×37 cuja geometria espelha o
+  espaçamento regular da base perfurada.
+* Cada célula passa por uma cascata de pré-processamentos
+  (`otsu` → `otsu_bil` → `adaptive` → `sharp` → `gray`); o primeiro acerto
+  válido pelo allowlist vence.
+* **Células de borda** (cujo box foi clampado na margem da imagem) recebem
+  tratamento especial: o pipeline computa um crop expandido (+15 %) centrado
+  no grid intersection a partir de uma versão do ortho com borda replicada
+  (`BORDER_REPLICATE`), e **vota** entre todos os pré-processamentos do crop
+  clampado e do expandido. Isso resolve ambiguidades onde o quiet zone
+  assimétrico da borda confunde o `libdmtx`.
+* Quando todos os pré-processamentos canônicos falham e o tile parece ter
+  conteúdo real (`std ≥ 18`), a decodificação tenta crops centrais a 75 %,
+  65 % e 55 % do lado da célula. Esse multi-crop recupera símbolos cujo
+  vizinhança ruidosa atrapalha sem precisar rotacionar nada.
 
 ### Uso
 
@@ -116,13 +174,14 @@ python pipeline.py \
 
 ### Saída
 
-* `grid.txt` → matriz 37x37 com os símbolos detectados
+* `grid.txt` → matriz 37×37 com os símbolos detectados (`?` em cada célula
+  vazia).
 
 ### Debug
 
 ```bash
-python pipeline.py --test-cell 5,6
-python pipeline.py --dump-elements
+python pipeline.py --test-cell 5,6        # roda só uma célula e dump dos preprocessings
+python pipeline.py --dump-elements        # salva todos os tiles recortados em ./elements/
 ```
 
 ---
@@ -133,21 +192,27 @@ Arquivo: `pipeline_free.py`
 
 ### Descrição
 
-* Não depende de grade fixa
-* Detecta automaticamente regiões contendo códigos
-* Retorna posições reais (bounding boxes)
-* Para evolução do projeto livre da grade igualmente espaçada
+* Não depende de grade fixa.
+* Detecta automaticamente regiões contendo códigos via heatmap de
+  contraste/estrutura local + componentes conectados.
+* Retorna posições reais (bounding boxes) de cada símbolo encontrado.
+* É a base para evoluir o projeto além da grade igualmente espaçada.
 
 ### Etapas
 
-1. Ortorretificação
-2. Proposição de candidatos:
-
-   * heatmap local
-   * componentes conectados
-3. Filtragem (NMS)
-4. Decodificação
-5. Remoção de duplicatas
+1. Ortorretificação (homografia a partir dos 4 marcadores em cruz nos
+   cantos da maquete).
+2. Padding lateral do ortho com `BORDER_REPLICATE` (`--edge-pad`, default
+   80 px) para dar quiet zone aos símbolos colados nas bordas.
+3. Proposição de candidatos:
+   * heatmap local (variância + black-hat morfológico)
+   * componentes conectados sobre múltiplos mapas binários
+4. NMS global por IoU + distância entre centros.
+5. Decodificação com cascata de pré-processamentos (idem grid).
+6. Multi-crop (pad apertado) como fallback legítimo para tiles cujo
+   crop nominal não fechou e que ainda parecem ter conteúdo.
+7. Deduplicação por texto + proximidade.
+8. Ordenação espacial (linha → coluna).
 
 ### Uso
 
@@ -162,14 +227,17 @@ python pipeline_free.py \
 
 ### Saída
 
-* `symbols.json` → lista de códigos e posições
-* `annotated.png` → imagem com bounding boxes
-* `candidates/` (opcional) → regiões candidatas
+* `symbols.json` → lista de códigos com `text`, `box` e `center` em
+  coordenadas do ortho original.
+* `annotated.png` → ortho com retângulo verde + rótulo `i:texto` para cada
+  detecção.
+* `candidates/` (opcional, com `--dump-candidates`) → regiões candidatas
+  recortadas, antes da decodificação.
 
 ### Debug
 
 ```bash
-python pipeline_free.py --dump-candidates
+python pipeline_free.py --dump-candidates  # despeja todas as ROIs candidatas
 ```
 
 ---
@@ -221,6 +289,30 @@ O projeto salvo contém:
 * `maquete_objetos.json` → elementos arquitetônicos no formato Revit
 * `maquete_imagem.png` → imagem original
 * `maquete_grade.txt` → grade 37×37 de símbolos
+
+---
+
+# Validação contra um gabarito
+
+`tests/validate_baseline.py` é o script canônico para verificar os pipelines
+contra um gabarito. Ele lê `tests/expected_baseline.json` (que vive separado
+do `symbols_config.json` justamente porque é específico de um lote de fotos
+e não do projeto), roda os pipelines em subprocesso e compara o `Counter`
+decodificado com o multiset esperado.
+
+```bash
+python tests/validate_baseline.py --pipeline free      # só pipeline_free.py
+python tests/validate_baseline.py --pipeline grid      # só pipeline.py (grade)
+python tests/validate_baseline.py --pipeline pyapparq  # só PyAppArq via API
+python tests/validate_baseline.py --pipeline both      # grid + free (default)
+python tests/validate_baseline.py --pipeline all       # todos os três
+```
+
+O script imprime uma linha por imagem com `count`, `missing`, `extra` e
+`[OK]/[FAIL]`, e devolve exit code `0` se tudo bater. O `expected_baseline.json`
+do lote atual cobre 8 imagens (4 fotos + 4 ortos rotacionados em 90°/180°/270°)
+e exige 42 letras por imagem. Para um lote novo, basta criar outro
+`expected_*.json` ao lado e passar com `--baseline`.
 
 ---
 

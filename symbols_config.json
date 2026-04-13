@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "description": "Vocabulario de simbolos validos para decodificacao DataMatrix ECC200 do TCC. Atua como allowlist permanente do validador, filtrando leituras espurias do libdmtx.",
+  "max_length": 4,
+  "vocabulary": [
+    "A", "B", "C", "E", "F", "G", "H", "J",
+    "M", "O", "P", "R", "S", "T", "V", "X",
+    "h"
+  ]
+}

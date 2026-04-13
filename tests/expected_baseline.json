@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "description": "Gabarito do lote atual de 8 imagens (imagem*.png e annotated*.png). Mesmas 42 letras em todas, dispostas em posicoes diferentes apenas pela rotacao.",
+  "images": [
+    "imagem.png",
+    "imagem_90.png",
+    "imagem_180.png",
+    "imagem_270.png",
+    "annotated.png",
+    "annotated_90.png",
+    "annotated_180.png",
+    "annotated_270.png"
+  ],
+  "expected_count": 42,
+  "expected_multiset": {
+    "A": 2,
+    "B": 1,
+    "E": 2,
+    "F": 2,
+    "G": 1,
+    "H": 2,
+    "J": 3,
+    "M": 4,
+    "O": 3,
+    "P": 4,
+    "R": 5,
+    "S": 3,
+    "T": 2,
+    "V": 2,
+    "X": 2,
+    "h": 4
+  }
+}
