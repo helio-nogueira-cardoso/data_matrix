@@ -6,17 +6,17 @@ Pipeline para ortorretificação, detecção e decodificação de códigos DataM
 
 # Contexto do Projeto
 
-Este repositório integra um projeto mais amplo que combina arquitetura, sistemas físicos modulares e visão computacional, com o objetivo de converter uma maquete física configurável em uma representação digital estruturada.
+Este projeto integra um trabalho mais amplo que combina arquitetura, sistemas físicos modulares e visão computacional, com o objetivo de converter uma maquete física configurável em uma representação digital estruturada.
 
 A maquete é construída sobre uma base com uma grade regular de furos igualmente espaçados, permitindo o encaixe de módulos físicos que representam elementos arquitetônicos, como paredes, portas, janelas e mobiliário. A configuração espacial é definida pela disposição desses módulos na grade.
 
-Cada elemento físico pode conter múltiplos códigos DataMatrix ECC200 (por exemplo, 2, 3 ou 4 códigos). Esses códigos não são interpretados isoladamente neste repositório. A combinação entre eles é utilizada posteriormente por um sistema responsável pela interpretação semântica dos elementos, incluindo tipo, orientação e relações espaciais.
+Cada elemento físico pode conter múltiplos códigos DataMatrix ECC200 (por exemplo, 2, 3 ou 4 códigos). Esses códigos não são interpretados isoladamente neste diretório. A combinação entre eles é utilizada posteriormente por um sistema responsável pela interpretação semântica dos elementos, incluindo tipo, orientação e relações espaciais.
 
 ---
 
-# Escopo do Repositório
+# Escopo do Projeto
 
-Este repositório contém dois componentes:
+Este projeto contém dois componentes:
 
 ## 1. Pipelines de visão computacional (raiz)
 
@@ -30,7 +30,7 @@ Responsáveis por:
 
 ## 2. Aplicação gráfica PyAppArq (`PyAppArq/`)
 
-Subprojeto Python do AppArq original (C++/Qt), mantido dentro deste repositório e compartilhando a mesma venv. Integra o pipeline de visão computacional com a interpretação semântica e exportação para BIM, incluindo:
+Subprojeto Python do AppArq original (C++/Qt), mantido dentro deste diretório e compartilhando a mesma venv. Integra o pipeline de visão computacional com a interpretação semântica e exportação para BIM, incluindo:
 
 * Interface gráfica GTK3 para carregamento de imagens
 * Dois modos de operação: interativo (verificação manual) e automático
@@ -266,7 +266,7 @@ Reescrita em Python da aplicação original AppArq (C++/Qt), com as seguintes mu
 | `objetos.json` | Definições dos elementos arquitetônicos |
 | `template.png` | Template dos marcadores de canto |
 
-As dependências Python do PyAppArq são as mesmas do restante do repositório e estão consolidadas no `requirements.txt` da raiz.
+As dependências Python do PyAppArq são as mesmas do restante do projeto e estão consolidadas no `requirements.txt` da raiz.
 
 ### Modos de operação
 
@@ -318,7 +318,7 @@ e exige 42 letras por imagem. Para um lote novo, basta criar outro
 
 # Instalação
 
-Todo o repositório — pipelines da raiz **e** PyAppArq — usa uma única venv e um único `requirements.txt`, ambos na raiz do projeto.
+Todo o projeto — pipelines da raiz **e** PyAppArq — usa uma única venv e um único `requirements.txt`, ambos na raiz do diretório.
 
 ## 1. Dependências de sistema (Debian/Ubuntu)
 
@@ -333,10 +333,9 @@ sudo apt install -y \
 * `libdmtx0t64` / `libdmtx-dev`: biblioteca nativa usada pelo `pylibdmtx`
 * `python3-gi` / `gir1.2-gtk-3.0`: GTK3 e PyGObject para a interface do PyAppArq (não instaláveis via pip)
 
-## 2. Venv única na raiz do repositório
+## 2. Venv única na raiz do projeto
 
 ```bash
-cd ECC200Decode
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 pip install --ignore-installed -r requirements.txt
