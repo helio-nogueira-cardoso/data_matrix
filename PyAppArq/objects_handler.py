@@ -169,54 +169,60 @@ class ObjectsHandler:
     # ------------------------------------------------------------------
 
     def _find_building_elements(self, grid):
+        """Localiza portas e janelas ao longo de cada parede ja detectada.
+
+        Cada elemento e codificado como um par de simbolos adjacentes
+        (color1, color2) entre as marcas A da parede. O par pode aparecer
+        em qualquer das duas ordens — k=0 e a ordem direta (color1 vem
+        primeiro) e k=1 e a ordem invertida; a celula ancora e sempre
+        aquela onde cai color1, e a orientacao registrada (90/270 em
+        parede horizontal, 0/180 em parede vertical) reflete de que lado
+        da parede o elemento abre.
+        """
         for wall in self.walls:
             beg, end = wall.beg, wall.end
 
-            if beg[0] == end[0]:  # parede horizontal
+            if beg[0] == end[0]:  # parede horizontal: percorre coluna a coluna
                 row = beg[0]
                 j = beg[1] + 1
                 while j < end[1] - 1:
                     arr = (self._get_symbol(grid, row, j),
                            self._get_symbol(grid, row, j + 1))
 
-                    found = False
                     for k in range(2):
                         test = arr if k == 0 else (arr[1], arr[0])
                         if test in self.building_types:
                             val = dict(self.building_types[test])
-                            if k == 0:
-                                val["position"] = [row, j]
-                            else:
-                                val["position"] = [row, j + 1]
+                            # Ancora na celula de color1: j para k=0, j+1 para k=1.
+                            val["position"] = [row, j] if k == 0 else [row, j + 1]
                             val["hostWall"] = wall.id
                             val["orientation"] = 90 if k == 0 else 270
                             self.building_elements.append(val)
+                            # Pula a celula par seguinte: ela ja foi consumida pelo elemento.
                             j += 1
-                            found = True
                             break
                     j += 1
 
-            else:  # parede vertical
+            else:  # parede vertical: percorre linha a linha
                 col = beg[1]
                 i = beg[0] + 1
                 while i < end[0] - 1:
                     arr = (self._get_symbol(grid, i, col),
                            self._get_symbol(grid, i + 1, col))
 
-                    found = False
                     for k in range(2):
                         test = arr if k == 0 else (arr[1], arr[0])
                         if test in self.building_types:
                             val = dict(self.building_types[test])
-                            if k == 0:
-                                val["position"] = [i, col]
-                            else:
-                                # Mantido comportamento original do C++ (usa col+1 mesmo para vertical).
-                                val["position"] = [i, col + 1]
+                            # Ancora na celula de color1: (i, col) para k=0,
+                            # (i, col+1) para k=1 — desloca-se uma coluna para
+                            # marcar o lado oposto da parede no par invertido.
+                            val["position"] = [i, col] if k == 0 else [i, col + 1]
                             val["hostWall"] = wall.id
                             val["orientation"] = 0 if k == 0 else 180
+                            self.building_elements.append(val)
+                            # Pula a celula par seguinte: ela ja foi consumida pelo elemento.
                             i += 1
-                            found = True
                             break
                     i += 1
 
