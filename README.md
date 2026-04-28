@@ -1,6 +1,6 @@
 # ECC200Decode
 
-Pipeline para ortorretificação, detecção e decodificação de códigos DataMatrix ECC200 a partir de imagens de uma maquete física modular.
+Pipeline para ortorretificação, detecção e decodificação de códigos DataMatrix ECC200 a partir de imagens de uma maquete física modular. Base para projeto de TCC.
 
 ---
 
