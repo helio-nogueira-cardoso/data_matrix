@@ -703,6 +703,12 @@ def decode_grid(
             for r, c, value in ex.map(_decode_worker, jobs, chunksize=chunksize):
                 grid[r][c] = value
 
+    # A foto e capturada pela face inferior da maquete, entao o eixo
+    # horizontal sai espelhado em relacao a vista de topo real. Espelhamos
+    # as colunas antes de serializar para que o grid.txt fique em frame
+    # de topo (mesmo frame que a saida JSON do PyAppArq).
+    grid = [row[::-1] for row in grid]
+
     # Converte a matriz para string final do grid.txt.
     return "\n".join(" ".join(row) for row in grid)
 
