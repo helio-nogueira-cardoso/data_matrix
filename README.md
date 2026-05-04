@@ -183,7 +183,12 @@ python pipeline.py \
 ### Saída
 
 * `grid.txt` → matriz 37×37 com os símbolos detectados (`?` em cada célula
-  vazia).
+  vazia), em **frame de topo** — colunas espelhadas em relação à foto, de
+  modo que o arquivo bate com a vista superior real da maquete e com o
+  JSON do PyAppArq. Os modos de debug (`--test-cell`, `--dump-elements`)
+  continuam usando coordenadas em frame de foto, porque operam diretamente
+  sobre o ortho — para localizar uma célula vista no `grid.txt` em modo
+  debug, use `(linha, COLS-1-coluna)`.
 
 ### Debug
 
@@ -236,11 +241,15 @@ python pipeline_free.py \
 ### Saída
 
 * `symbols.json` → lista de códigos com `text`, `box` e `center` em
-  coordenadas do ortho original.
+  coordenadas do ortho, com o eixo `x` espelhado para sair em **frame
+  de topo** (alinhado com `pipeline.py` e PyAppArq). A ordem dos
+  símbolos preserva a ordenação espacial original (linha → coluna na
+  foto), então os índices batem com os da imagem anotada.
 * `annotated.png` → ortho com retângulo verde + rótulo `i:texto` para cada
-  detecção.
+  detecção, em **frame de foto** (sobre o ortho original, sem flip).
+  Use os índices para correlacionar com o JSON.
 * `candidates/` (opcional, com `--dump-candidates`) → regiões candidatas
-  recortadas, antes da decodificação.
+  recortadas, antes da decodificação. Coordenadas em frame de foto.
 
 ### Debug
 
@@ -303,10 +312,12 @@ O projeto salvo contém:
 A foto é capturada da face inferior da maquete, então o eixo horizontal
 sai espelhado em relação à vista de topo real. Antes da análise semântica,
 o grid é espelhado horizontalmente (`grid = [row[::-1] for row in grid]`),
-de modo que `maquete_objetos.json` exporta coordenadas em **frame de topo**
-— compatível com o que o plugin do Revit espera. O `maquete_grade.txt`
-e a `maquete_imagem.png` ficam em frame de foto, casando com o que o
-usuário vê na GUI.
+de modo que `maquete_objetos.json` e `maquete_grade.txt` saem em **frame
+de topo** — compatível com o que o plugin do Revit espera e alinhado com
+os outros pipelines do projeto. Apenas a `maquete_imagem.png` continua em
+frame de foto, casando com a renderização do canvas da GUI (que mostra a
+imagem como capturada). Para correlacionar célula da GUI com posição
+no `maquete_grade.txt`, use `coluna_grade = COLS - 1 - coluna_GUI`.
 
 ---
 

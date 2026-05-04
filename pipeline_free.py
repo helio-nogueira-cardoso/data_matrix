@@ -1047,10 +1047,28 @@ def main():
                 )
 
     # Etapa 7: salvar saída JSON
+    #
+    # A foto é capturada pela face inferior da maquete, então o eixo
+    # horizontal sai espelhado em relação à vista de topo real.
+    # Espelhamos `box` e `center` para que o JSON saia em frame de topo
+    # (alinhado com o grid.txt de pipeline.py e o maquete_objetos.json
+    # do PyAppArq). A imagem anotada (etapa 8) continua em frame de foto
+    # porque é diagnóstico visual sobre o ortho original — os índices
+    # entre JSON e imagem anotada permanecem alinhados (mesma ordem).
+    ortho_w = ortho.shape[1]
+    decoded_top_view = []
+    for r in decoded:
+        x, y, bw, bh = r["box"]
+        cx, cy = r["center"]
+        flipped = dict(r)
+        flipped["box"] = [int(ortho_w - x - bw), int(y), int(bw), int(bh)]
+        flipped["center"] = [float(ortho_w - 1 - cx), float(cy)]
+        decoded_top_view.append(flipped)
+
     payload = {
-        "count": len(decoded),
+        "count": len(decoded_top_view),
         "candidates_considered": len(candidates),
-        "symbols": decoded,
+        "symbols": decoded_top_view,
     }
 
     Path(args.results_json).write_text(
@@ -1058,7 +1076,7 @@ def main():
         encoding="utf-8",
     )
 
-    # Etapa 8: salvar imagem anotada
+    # Etapa 8: salvar imagem anotada (em frame de foto, sobre o ortho original)
     annotated = annotate_image(ortho, decoded)
     if not cv2.imwrite(args.annotated_output, annotated):
         raise RuntimeError("Falha ao salvar imagem anotada")

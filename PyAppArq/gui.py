@@ -648,10 +648,10 @@ def _save_project(project_name, out_dir, grid, ortho_bgr,
 
     # A foto e capturada da face inferior da maquete, entao o eixo horizontal
     # sai espelhado em relacao a vista de topo real. Espelhamos as colunas do
-    # grid antes da analise semantica para que paredes/portas/janelas/etc.
-    # saiam com coords em frame de topo, que e o que o plugin do Revit espera.
-    # O grid original (em frame de foto) e mantido para o maquete_grade.txt
-    # mais abaixo, casando com a imagem salva (tambem em frame de foto).
+    # grid antes da analise semantica e tambem na escrita do maquete_grade.txt
+    # de modo que JSON e grid de saida fiquem no mesmo frame de topo (o que
+    # o plugin do Revit espera). A maquete_imagem.png salva mais abaixo
+    # continua em frame de foto, casando com a renderizacao da GUI.
     top_view_grid = [row[::-1] for row in grid]
 
     # Interpretacao semantica
@@ -670,9 +670,10 @@ def _save_project(project_name, out_dir, grid, ortho_bgr,
     if original is not None:
         cv2.imwrite(str(img_path), original)
 
-    # Salva tambem a grade como texto para referencia
+    # Salva tambem a grade como texto para referencia, em frame de topo
+    # (mesmo frame do maquete_objetos.json).
     grid_path = folder / "maquete_grade.txt"
-    grid_text = "\n".join(" ".join(row) for row in grid)
+    grid_text = "\n".join(" ".join(row) for row in top_view_grid)
     grid_path.write_text(grid_text, encoding="utf-8")
 
     print(f"Projeto salvo em: {folder}")
