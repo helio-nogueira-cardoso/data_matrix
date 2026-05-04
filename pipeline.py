@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
@@ -411,8 +412,10 @@ def decode_datamatrix_gray_with_method(
     use_edge_bounds=False,
 ):
     # Decodifica um tile em grayscale e retorna:
-    # - texto decodificado
-    # - método vencedor ("otsu", "sharp" ou "gray")
+    # - texto decodificado (vencedor do voto entre pré-processamentos)
+    # - método cuja leitura foi escolhida ("otsu", "otsu_bil", "adaptive",
+    #   "sharp" ou "gray", possivelmente sufixado com "_cNN" se veio do
+    #   fallback de multi-crop)
     #
     # Caso não encontre nada, retorna (None, None).
 
@@ -431,15 +434,52 @@ def decode_datamatrix_gray_with_method(
         use_edge_bounds=use_edge_bounds,
     )
 
-    # Testa cada candidato na ordem definida. Early-exit na primeira leitura
-    # válida pelo allowlist.
-    for method, img in candidates:
+    # Voto entre os pré-processamentos: roda os dois primeiros (otsu, otsu_bil),
+    # e se concordarem em uma leitura válida, aceita imediatamente (caminho
+    # rápido — cobre a maioria dos tiles bem-comportados). Se discordarem, ou
+    # se ambos falharem, roda o resto e desempata por maioria. Cascade-only
+    # falhava em tiles onde o caminho otsu (CLAHE+sharpen) flipa bits dentro
+    # do símbolo por causa do overshoot do sharpen — vide caso do DataMatrix
+    # colado no furo da base que retornava "G" quando a leitura correta era "H".
+    results = {}
+    for method, img in candidates[:2]:
         text = try_decode_text(
             img, timeout=timeout, shrink=shrink,
             min_edge=min_edge, max_edge=max_edge,
         )
         if text is not None and looks_like_valid_symbol(text):
-            return text, method
+            results[method] = text
+
+    distinct = set(results.values())
+    if len(distinct) == 1 and len(results) == 2:
+        winner = next(iter(distinct))
+        winning_method = next(m for m, _ in candidates if results.get(m) == winner)
+        return winner, winning_method
+
+    # Discordância (ou ambos None): roda o restante pra ter votos suficientes.
+    for method, img in candidates[2:]:
+        text = try_decode_text(
+            img, timeout=timeout, shrink=shrink,
+            min_edge=min_edge, max_edge=max_edge,
+        )
+        if text is not None and looks_like_valid_symbol(text):
+            results[method] = text
+
+    if results:
+        counts = Counter(results.values())
+        max_count = max(counts.values())
+        top = [t for t, c in counts.items() if c == max_count]
+        if len(top) == 1:
+            winner = top[0]
+        else:
+            # Empate: desempata pela ordem do cascade (otsu primeiro).
+            winner = next(
+                results[m] for m, _ in candidates if results.get(m) in top
+            )
+        winning_method = next(
+            m for m, _ in candidates if results.get(m) == winner
+        )
+        return winner, winning_method
 
     # Fallback legítimo: variação do tamanho do crop para células cujo
     # pré-processamento canônico falhou mas que parecem ter conteúdo real.

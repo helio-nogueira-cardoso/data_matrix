@@ -9,6 +9,7 @@ escrever arquivos.
 
 import json
 import os
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -460,7 +461,16 @@ def build_candidates_and_bounds(tile_gray, border=10, resize_factor=2.0,
 def decode_datamatrix_gray(tile_gray, timeout=40, shrink=2, border=10,
                            resize_factor=2.0, skip_empty=False,
                            use_edge_bounds=False):
-    """Decodifica um tile em grayscale. Retorna (texto, metodo) ou (None, None)."""
+    """Decodifica um tile em grayscale. Retorna (texto, metodo) ou (None, None).
+
+    Voto entre os pre-processamentos: roda os dois primeiros (otsu, otsu_bil)
+    e, se concordam em uma leitura valida, aceita imediatamente (caminho
+    rapido). Se discordam ou ambos falham, roda o resto e desempata por
+    maioria, com a ordem do cascade como tiebreaker. Cascade-only falhava em
+    tiles onde o caminho otsu (CLAHE+sharpen) flipa bits dentro do simbolo
+    por causa do overshoot do sharpen — vide DataMatrix colado no furo da
+    base que retornava "G" quando a leitura correta era "H".
+    """
     if tile_gray is None or tile_gray.size == 0:
         return None, None
     if skip_empty and tile_looks_empty(tile_gray):
@@ -470,11 +480,42 @@ def decode_datamatrix_gray(tile_gray, timeout=40, shrink=2, border=10,
         tile_gray, border=border, resize_factor=resize_factor,
         use_edge_bounds=use_edge_bounds,
     )
-    for method, img in candidates:
+
+    results = {}
+    for method, img in candidates[:2]:
         text = try_decode_text(img, timeout=timeout, shrink=shrink,
                                min_edge=min_edge, max_edge=max_edge)
         if text is not None and looks_like_valid_symbol(text):
-            return text, method
+            results[method] = text
+
+    distinct = set(results.values())
+    if len(distinct) == 1 and len(results) == 2:
+        winner = next(iter(distinct))
+        winning_method = next(m for m, _ in candidates if results.get(m) == winner)
+        return winner, winning_method
+
+    # Discordancia (ou ambos None): roda o restante pra ter votos suficientes.
+    for method, img in candidates[2:]:
+        text = try_decode_text(img, timeout=timeout, shrink=shrink,
+                               min_edge=min_edge, max_edge=max_edge)
+        if text is not None and looks_like_valid_symbol(text):
+            results[method] = text
+
+    if results:
+        counts = Counter(results.values())
+        max_count = max(counts.values())
+        top = [t for t, c in counts.items() if c == max_count]
+        if len(top) == 1:
+            winner = top[0]
+        else:
+            # Empate: desempata pela ordem do cascade (otsu primeiro).
+            winner = next(
+                results[m] for m, _ in candidates if results.get(m) in top
+            )
+        winning_method = next(
+            m for m, _ in candidates if results.get(m) == winner
+        )
+        return winner, winning_method
 
     # Fallback legitimo: simbolos colocados manualmente na maquete podem cair
     # ligeiramente fora do centro da celula. Recortar o centro da celula com
