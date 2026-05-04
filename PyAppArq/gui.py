@@ -646,9 +646,17 @@ def _save_project(project_name, out_dir, grid, ortho_bgr,
     folder = Path(out_dir) / project_name
     folder.mkdir(parents=True, exist_ok=True)
 
+    # A foto e capturada da face inferior da maquete, entao o eixo horizontal
+    # sai espelhado em relacao a vista de topo real. Espelhamos as colunas do
+    # grid antes da analise semantica para que paredes/portas/janelas/etc.
+    # saiam com coords em frame de topo, que e o que o plugin do Revit espera.
+    # O grid original (em frame de foto) e mantido para o maquete_grade.txt
+    # mais abaixo, casando com a imagem salva (tambem em frame de foto).
+    top_view_grid = [row[::-1] for row in grid]
+
     # Interpretacao semantica
     handler = ObjectsHandler(objects_path)
-    handler.find_objects_in_grid(grid)
+    handler.find_objects_in_grid(top_view_grid)
     objects = handler.format_objects_json()
 
     # Escreve o JSON
