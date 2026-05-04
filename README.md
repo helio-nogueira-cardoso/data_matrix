@@ -130,10 +130,13 @@ geraria leituras potencialmente erradas em produção, onde não há gabarito
 para validar. As recuperações vêm exclusivamente de variações *legítimas*:
 
 * **Pré-processamentos diferentes** (Otsu, bilateral, adaptativo, sharpening,
-  escala de cinza com borda).
-* **Multi-crop** — crops centrais com lados menores (75 %, 65 %, 55 %).
-* **Votação de borda** — para células clampadas na margem do ortho, votação
-  entre o crop original e um crop expandido (+15 %) com borda replicada.
+  escala de cinza com borda) decididos por **voto majoritário** entre os 5
+  candidatos, em vez de cascade-com-early-exit. Cobre o caso de o `otsu` ler
+  uma letra errada mas válida (no allowlist) em tiles onde CLAHE+sharpen
+  flipa bits dentro do símbolo.
+* **Multi-crop** — crops centrais com lados menores (75 %, 65 %, 55 %)
+  como recurso quando todos os pré-processamentos falham num tile que
+  ainda parece ter conteúdo real.
 * **Allowlist** — rejeição de leituras fora do vocabulário do projeto.
 
 ---
@@ -148,18 +151,23 @@ Arquivo: `pipeline.py`
 
 * Divide a imagem em uma grade fixa 37×37 cuja geometria espelha o
   espaçamento regular da base perfurada.
-* Cada célula passa por uma cascata de pré-processamentos
-  (`otsu` → `otsu_bil` → `adaptive` → `sharp` → `gray`); o primeiro acerto
-  válido pelo allowlist vence.
-* **Células de borda** (cujo box foi clampado na margem da imagem) recebem
-  tratamento especial: o pipeline computa um crop expandido (+15 %) centrado
-  no grid intersection a partir de uma versão do ortho com borda replicada
-  (`BORDER_REPLICATE`), e **vota** entre todos os pré-processamentos do crop
-  clampado e do expandido. Isso resolve ambiguidades onde o quiet zone
-  assimétrico da borda confunde o `libdmtx`.
+* Cada célula passa por 5 pré-processamentos
+  (`otsu`, `otsu_bil`, `adaptive`, `sharp`, `gray`) com **voto majoritário**.
+  Caminho rápido: se `otsu` e `otsu_bil` concordam numa leitura válida pelo
+  allowlist, ela vence sem rodar o resto. Caso contrário, roda os outros
+  três e desempata pela leitura mais frequente (ordem do cascade como
+  tiebreaker em empate). Isso evita que o `otsu` curto-circuite o cascade
+  com leitura errada-mas-válida em tiles onde CLAHE+sharpen flipa bits
+  dentro do símbolo (overshoot nas bordas dos módulos).
+* A margem do ortho é calculada automaticamente como `ceil(passo/2)` do
+  menor lado da grade. Como os marcadores de canto ficam centralizados
+  nos furos extremos, isso garante que toda célula — inclusive as de
+  borda — tenha recorte do tamanho nominal com o símbolo centralizado.
+  Não há mais necessidade de votação de borda ou padding auxiliar para
+  resolver clamping na margem.
 * Quando todos os pré-processamentos canônicos falham e o tile parece ter
   conteúdo real (`std ≥ 18`), a decodificação tenta crops centrais a 75 %,
-  65 % e 55 % do lado da célula. Esse multi-crop recupera símbolos cujo
+  65 % e 55 % do lado da célula. Esse multi-crop recupera símbolos cuja
   vizinhança ruidosa atrapalha sem precisar rotacionar nada.
 
 ### Uso
@@ -290,6 +298,16 @@ O projeto salvo contém:
 * `maquete_imagem.png` → imagem original
 * `maquete_grade.txt` → grade 37×37 de símbolos
 
+### Frame de coordenadas
+
+A foto é capturada da face inferior da maquete, então o eixo horizontal
+sai espelhado em relação à vista de topo real. Antes da análise semântica,
+o grid é espelhado horizontalmente (`grid = [row[::-1] for row in grid]`),
+de modo que `maquete_objetos.json` exporta coordenadas em **frame de topo**
+— compatível com o que o plugin do Revit espera. O `maquete_grade.txt`
+e a `maquete_imagem.png` ficam em frame de foto, casando com o que o
+usuário vê na GUI.
+
 ---
 
 # Validação contra um gabarito
@@ -320,18 +338,37 @@ e exige 42 letras por imagem. Para um lote novo, basta criar outro
 
 Todo o projeto — pipelines da raiz **e** PyAppArq — usa uma única venv e um único `requirements.txt`, ambos na raiz do diretório.
 
-## 1. Dependências de sistema (Debian/Ubuntu)
+## 1. Dependências de sistema (Debian/Ubuntu/Mint)
+
+O nome do pacote do `libdmtx` mudou entre versões. O comando abaixo escolhe
+o que estiver disponível na sua distribuição (Debian 12+, Ubuntu 24.04+,
+Mint 22+ usam `libdmtx0t64`; Ubuntu 22.04, Mint 21 usam `libdmtx0b`;
+versões mais antigas usam `libdmtx0a`):
 
 ```bash
 sudo apt update
+
+# detecta o nome certo do libdmtx runtime na distro atual
+LIBDMTX=$(apt-cache search '^libdmtx0' | awk '{print $1}' | head -1)
+
 sudo apt install -y \
   python3 python3-venv python3-pip \
-  libdmtx0t64 libdmtx-dev \
+  "$LIBDMTX" libdmtx-dev \
   python3-gi python3-gi-cairo gir1.2-gtk-3.0
 ```
 
-* `libdmtx0t64` / `libdmtx-dev`: biblioteca nativa usada pelo `pylibdmtx`
-* `python3-gi` / `gir1.2-gtk-3.0`: GTK3 e PyGObject para a interface do PyAppArq (não instaláveis via pip)
+Se preferir instalar manualmente, use um destes nomes para o runtime do libdmtx:
+`libdmtx0t64` (Debian 12+, Ubuntu 24.04+, Mint 22+), `libdmtx0b` (Ubuntu 22.04, Mint 21),
+ou `libdmtx0a` (versões mais antigas).
+
+Significado dos pacotes:
+
+* `libdmtx0t64` (ou `libdmtx0a`/`libdmtx0b`) e `libdmtx-dev`: biblioteca nativa
+  usada pelo `pylibdmtx`. **Os dois** são necessários — o runtime para
+  carregar a `.so` em tempo de execução e o `-dev` para o pip conseguir
+  fazer linkagem ao instalar o `pylibdmtx`.
+* `python3-gi` / `python3-gi-cairo` / `gir1.2-gtk-3.0`: GTK3 e PyGObject
+  para a interface do PyAppArq (não instaláveis via pip).
 
 ## 2. Venv única na raiz do projeto
 
@@ -361,16 +398,43 @@ setuptools
 
 # Problemas comuns
 
-## libdmtx
+## libdmtx — `Unable to locate package libdmtx0t64`
+
+Mensagem típica em Linux Mint 21 ou Ubuntu 22.04 (ambos baseados em
+Ubuntu Jammy). O nome do pacote runtime nessas versões é `libdmtx0b`,
+não `libdmtx0t64`. Descubra qual está disponível:
 
 ```bash
-sudo apt install libdmtx0t64 libdmtx-dev
+apt-cache search '^libdmtx0'
+```
+
+E instale o que for listado, junto com `libdmtx-dev`:
+
+```bash
+sudo apt install <nome-do-runtime> libdmtx-dev
+```
+
+## libdmtx — `pylibdmtx` instala mas trava na primeira chamada
+
+Significa que o runtime (`libdmtx0t64`/`0b`/`0a`) está faltando — só
+`libdmtx-dev` foi instalado. O `dev` traz só os headers, não a `.so`
+carregada em runtime. Reinstale o runtime:
+
+```bash
+sudo apt install --reinstall <nome-do-runtime>
 ```
 
 ## OpenCV
 
 ```bash
 pip install opencv-python
+```
+
+Em Mint, se `import cv2` falhar com `libGL.so.1: cannot open shared object`,
+instale a dependência nativa:
+
+```bash
+sudo apt install libgl1
 ```
 
 ## GTK3 / PyGObject (para PyAppArq)
@@ -390,6 +454,19 @@ Se você criou a venv e o `pip install` disse "Requirement already satisfied" pa
 ```bash
 pip install --ignore-installed -r requirements.txt
 ```
+
+## Mint: `pip install` reclama de `externally-managed-environment`
+
+Mint 22 herda do Ubuntu 24.04 a política PEP 668 que bloqueia `pip` fora
+de venv. **Dentro** da venv (com `source .venv/bin/activate`) o erro não
+deve aparecer. Se aparecer, confirme que o `python` ativo é o da venv:
+
+```bash
+which python    # deve apontar para .venv/bin/python
+```
+
+Se precisar instalar algo fora da venv, use `pipx` ou `--break-system-packages`
+— mas pra este projeto, basta sempre estar dentro da venv.
 
 ---
 
