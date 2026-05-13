@@ -567,14 +567,25 @@ def _decode_worker(job):
         resize_factor=resize_factor, skip_empty=skip_empty,
         use_edge_bounds=use_edge_bounds,
     )
-    return r, c, text if text is not None else "?"
+    return r, c, text if text is not None else "_"
 
 
 def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
                 decode_border=10, resize_factor=2.0, workers=None,
                 chunksize=16, skip_empty=True, use_edge_bounds=False,
-                refine_cells=False, refine_max_shift=0):
-    """Decodifica a grade 37x37 completa. Retorna lista 2D de simbolos."""
+                refine_cells=False, refine_max_shift=0,
+                refine_fallback=True):
+    """Decodifica a grade 37x37 completa. Retorna lista 2D de simbolos.
+
+    refine_cells=True aplica o realinhamento da caixa (centra no componente
+    conexo escuro) em todas as células antes de decodificar. refine_cells=False
+    decodifica primeiro na caixa nominal; quando refine_fallback=True
+    (padrão), há uma segunda passada que tenta o realinhamento apenas nas
+    células que ficaram '_' na primeira. Isso casa os dois regimes: o nominal
+    funciona melhor em símbolos bem centralizados (alguns tiles 'h' e 'V'
+    pioram com realinhamento por causa de pontos parasitas), e o realinhado
+    recupera símbolos fisicamente deslocados que escapam do recorte nominal.
+    """
     if workers is None:
         workers = max(1, (os.cpu_count() or 1) - 1)
 
@@ -582,7 +593,7 @@ def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
     ortho_gray = cv2.cvtColor(ortho_bgr, cv2.COLOR_BGR2GRAY)
     boxes = compute_grid_boxes(height, width, margin)
 
-    if refine_cells and refine_max_shift <= 0 and boxes:
+    if (refine_cells or refine_fallback) and refine_max_shift <= 0 and boxes:
         _, _, bx0, by0, bx1, by1 = boxes[0]
         cell_side = max(1, min(bx1 - bx0, by1 - by0))
         refine_max_shift = max(4, int(round(cell_side * 0.30)))
@@ -597,8 +608,8 @@ def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
         jobs.append((r, c, tile_gray, decode_timeout, decode_shrink,
                      decode_border, resize_factor, skip_empty, use_edge_bounds))
 
-    # Inicializa a grade com "?".
-    grid = [["?"] * COLS for _ in range(ROWS)]
+    # Inicializa a grade com "_".
+    grid = [["_"] * COLS for _ in range(ROWS)]
 
     if workers <= 1:
         for job in jobs:
@@ -611,6 +622,39 @@ def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
             for r, c, value in ex.map(_decode_worker, jobs, chunksize=chunksize):
                 grid[r][c] = value
 
+    # Segunda passada: retry com refinamento nas células que ficaram vazias.
+    # Só faz sentido se o usuário pediu fallback e a primeira passada não já
+    # rodou com refine_cells (caso contrário não há nada novo a tentar).
+    if refine_fallback and not refine_cells and refine_max_shift > 0:
+        fallback_jobs = []
+        for r, c, x0, y0, x1, y1 in boxes:
+            if grid[r][c] != "_":
+                continue
+            rx0, ry0, rx1, ry1 = refine_tile_box(
+                ortho_gray, x0, y0, x1, y1, refine_max_shift,
+            )
+            # Se refine_tile_box não moveu a caixa, repetir o decode dá o
+            # mesmo '_'. Pulamos para não pagar a chamada redundante.
+            if (rx0, ry0, rx1, ry1) == (x0, y0, x1, y1):
+                continue
+            tile_gray = crop_box(ortho_gray, rx0, ry0, rx1, ry1)
+            fallback_jobs.append((r, c, tile_gray, decode_timeout, decode_shrink,
+                                  decode_border, resize_factor, skip_empty,
+                                  use_edge_bounds))
+
+        if fallback_jobs:
+            if workers <= 1:
+                for job in fallback_jobs:
+                    r, c, value = _decode_worker(job)
+                    if value != "_":
+                        grid[r][c] = value
+            else:
+                with ProcessPoolExecutor(max_workers=workers) as ex:
+                    for r, c, value in ex.map(_decode_worker, fallback_jobs,
+                                              chunksize=chunksize):
+                        if value != "_":
+                            grid[r][c] = value
+
     return grid
 
 
@@ -622,7 +666,8 @@ def process_image(image_path, template_path, margin=None, decode_timeout=60,
                   decode_shrink=2, decode_border=10, resize_factor=2.0,
                   workers=None, chunksize=16, skip_empty=True,
                   use_edge_bounds=False, refine_cells=False,
-                  refine_max_shift=0, progress_callback=None):
+                  refine_max_shift=0, refine_fallback=True,
+                  progress_callback=None):
     """Executa o pipeline completo sobre uma imagem.
 
     Args:
@@ -633,7 +678,7 @@ def process_image(image_path, template_path, margin=None, decode_timeout=60,
 
     Returns:
         ortho_bgr: Imagem ortorretificada (array numpy BGR).
-        grid: Lista 37x37 de simbolos decodificados ("?" para falhas).
+        grid: Lista 37x37 de simbolos decodificados ("_" para falhas/vazio).
         boxes: Lista de (linha, coluna, x0, y0, x1, y1) das celulas.
     """
     def _progress(msg):
@@ -664,12 +709,13 @@ def process_image(image_path, template_path, margin=None, decode_timeout=60,
         use_edge_bounds=use_edge_bounds,
         refine_cells=refine_cells,
         refine_max_shift=refine_max_shift,
+        refine_fallback=refine_fallback,
     )
 
     height, width = ortho.shape[:2]
     boxes = compute_grid_boxes(height, width, margin)
 
-    decoded_count = sum(1 for row in grid for s in row if s != "?")
+    decoded_count = sum(1 for row in grid for s in row if s != "_")
     _progress(f"Concluido - {decoded_count} simbolos decodificados.")
 
     return ortho, grid, boxes

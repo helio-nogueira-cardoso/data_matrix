@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 EDGE = "A"
 WALL = "B"
 VOID = "X"
-EMPTY = "-"
+EMPTY = "_"
 
 
 @dataclass
@@ -69,9 +69,8 @@ class ObjectsHandler:
         self.furniture_elements = []
 
     def _get_symbol(self, grid, i, j):
-        """Retorna o simbolo em (i,j), tratando '?' como vazio."""
-        s = grid[i][j]
-        return EMPTY if s == "?" else s
+        """Retorna o simbolo em (i,j) da grade."""
+        return grid[i][j]
 
     # ------------------------------------------------------------------
     # Deteccao de paredes

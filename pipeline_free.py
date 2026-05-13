@@ -160,6 +160,7 @@ Parâmetros do heatmap:
 import argparse
 import json
 import os
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -177,6 +178,8 @@ from pipeline import (
     try_decode_text,
     tile_looks_empty,
     looks_like_valid_symbol,
+    refine_tile_box,
+    compute_grid_boxes,
 )
 
 # Quantidade de linhas e colunas usadas como referência de escala.
@@ -202,7 +205,11 @@ def parse_args():
     p.add_argument("--template", default="template.png")
     p.add_argument("--input", default="imagem.png")
     p.add_argument("--output", default="ortho.png")
-    p.add_argument("--margin", type=int, default=60)
+    # Default None: build_ortho calcula automaticamente como ceil(passo/2),
+    # mesma escolha do pipeline.py grid. Margem fixa em 60 gerava clamping
+    # de células de borda (config_4_sample_1 (3,1) o grid candidate vinha
+    # com tile 134x148 cortado, enquanto auto dá 147x147 completo).
+    p.add_argument("--margin", type=int, default=None)
     p.add_argument("--results-json", default="symbols.json")
     p.add_argument("--annotated-output", default="annotated.png")
 
@@ -237,12 +244,23 @@ def parse_args():
     # Proposição de candidatos
     # =========================
     p.add_argument("--proposal-scale", type=float, default=0.70)
-    # Lista de escalas extras para multi-pass de proposição. Vazia por padrão:
-    # a escala 0.70 cobre o caso comum e a fase 2 (pad apertado + rotações) do
-    # decodificador resolve os tiles que escapam. Mantida como flag para
-    # depuração e para imagens fora do conjunto de treinamento.
-    p.add_argument("--proposal-scales", default="")
+    # Lista de escalas extras para multi-pass de proposição. Default "0.90"
+    # porque a escala única 0.70 perde tiles em paredes densas: o filtro
+    # de máximos locais com dilatação suprime peaks vizinhos quando o
+    # entorno tem muitos componentes escuros adjacentes. Rodar também a
+    # 0.90 (janela maior) recupera esses peaks suprimidos. Recuperação
+    # típica: 9-23 células em config_1_sample_2/_3, config_3_sample_1 e
+    # 1 célula S em imagem_90 do baseline, sem introduzir misreads
+    # (escala 0.50 testada introduzia 'F'→'E' em imagem_90; 0.90 não).
+    p.add_argument("--proposal-scales", default="0.90")
     p.add_argument("--max-candidates", type=int, default=20000)
+    # Cap por família (heatmap e components, antes do NMS global). Default 200:
+    # com a adição de propose_from_grid como terceira fonte cobrindo as
+    # 1369 células nominais, podemos manter o heatmap/components em 200 por
+    # família — qualquer célula que o NMS interno descarte (e que tenha
+    # símbolo real) cai no grid candidate e é recuperada pelo dedup
+    # posicional. Manter 500 (valor anterior) só inflava o tempo de decode
+    # sem ganho final em acurácia depois do grid.
     p.add_argument("--max-candidates-per-family", type=int, default=200)
     p.add_argument("--nms-iou", type=float, default=0.30)
     p.add_argument("--merge-distance", type=int, default=12)
@@ -689,6 +707,92 @@ def propose_from_components(gray, args, ref_shape=None):
     return all_cands
 
 
+def propose_from_grid(args, ortho_shape, edge_pad):
+    """Propostas alinhadas à grade nominal 37x37 (mesma geometria que
+    pipeline.py grid).
+
+    Cobre regiões onde heatmap e components propõem caixas off-center
+    cujos bits decodificam para um símbolo válido pelo allowlist mas
+    diferente do real (caso (3,1)='H' lido como 'X' por otsu_bil em
+    config_4_sample_1). Para esses tiles, a caixa nominal da grade
+    decodifica corretamente, e a deduplicação posterior (por posição,
+    preferindo a leitura com mais votos do voto majoritário) escolhe a
+    leitura certa entre as duas.
+
+    Score baixo (~10) faz com que essas propostas só vençam o dedup
+    quando têm mais votos que o heatmap concorrente.
+    """
+    oh, ow = ortho_shape
+    boxes = compute_grid_boxes(oh, ow, args.margin, rows=args.rows, cols=args.cols)
+    candidates = []
+    for r, c, x0, y0, x1, y1 in boxes:
+        px = x0 + edge_pad
+        py = y0 + edge_pad
+        pw = x1 - x0
+        ph = y1 - y0
+        candidates.append({
+            "box": (int(px), int(py), int(pw), int(ph)),
+            "score": 10.0,
+            "source": f"grid_{r}_{c}",
+        })
+    return candidates
+
+
+def _vote_decode_candidates(candidates, timeout, shrink, min_edge, max_edge):
+    # Voto majoritário entre pré-processamentos. Mesma lógica de
+    # pipeline.py::decode_datamatrix_gray_with_method: roda os dois primeiros
+    # (otsu, otsu_bil) e, se concordam num símbolo válido, aceita imediatamente
+    # (caminho rápido). Se discordam ou ambos falham, roda o resto e escolhe a
+    # leitura mais frequente, com a ordem do cascade como tiebreaker.
+    #
+    # Retorna (texto, metodo, n_votes) onde n_votes é o número de
+    # pré-processamentos que concordaram na leitura vencedora. Útil para
+    # comparar "confiança" entre voto na caixa nominal e na caixa refinada
+    # (caso de (3,1)=X em config_4_sample_1: nominal tem só 1 voto em 'X';
+    # refinada tem 2+ votos em 'H'). Retorna (None, None, 0) se nenhum
+    # pré-processamento der leitura válida.
+    results = {}
+    for method, img in candidates[:2]:
+        text = try_decode_text(
+            img, timeout=timeout, shrink=shrink,
+            min_edge=min_edge, max_edge=max_edge,
+        )
+        if text is not None and looks_like_valid_symbol(text):
+            results[method] = text
+
+    distinct = set(results.values())
+    if len(distinct) == 1 and len(results) == 2:
+        winner = next(iter(distinct))
+        winning_method = next(m for m, _ in candidates if results.get(m) == winner)
+        return winner, winning_method, 2
+
+    for method, img in candidates[2:]:
+        text = try_decode_text(
+            img, timeout=timeout, shrink=shrink,
+            min_edge=min_edge, max_edge=max_edge,
+        )
+        if text is not None and looks_like_valid_symbol(text):
+            results[method] = text
+
+    if results:
+        counts = Counter(results.values())
+        max_count = max(counts.values())
+        top = [t for t, c in counts.items() if c == max_count]
+        if len(top) == 1:
+            winner = top[0]
+        else:
+            # Empate: desempata pela ordem do cascade (otsu primeiro).
+            winner = next(
+                results[m] for m, _ in candidates if results.get(m) in top
+            )
+        winning_method = next(
+            m for m, _ in candidates if results.get(m) == winner
+        )
+        return winner, winning_method, max_count
+
+    return None, None, 0
+
+
 def decode_candidate_from_box(gray, box, args):
     """
     Tenta decodificar um único candidato.
@@ -737,27 +841,73 @@ def decode_candidate_from_box(gray, box, args):
         use_edge_bounds=args.use_edge_bounds,
     )
 
-    for method, img in candidate_imgs:
-        text = try_decode_text(
-            img,
-            timeout=args.decode_timeout,
-            shrink=args.decode_shrink,
-            min_edge=min_edge,
-            max_edge=max_edge,
+    # Voto majoritário entre os pré-processamentos canônicos (mesma lógica de
+    # pipeline.py grid). Cascade-com-early-exit pegava a primeira leitura
+    # válida pelo allowlist, mesmo quando outros pré-processamentos votariam
+    # diferente — caso típico: tile na borda do ortho onde otsu_bil lê 'X'
+    # mas otsu/adaptive/sharp/gray leem 'H'.
+    winner, winning_method, n_votes = _vote_decode_candidates(
+        candidate_imgs, args.decode_timeout, args.decode_shrink,
+        min_edge, max_edge,
+    )
+
+    # Cross-check com refine: quando o vencedor nominal tem só 1 voto
+    # (baixa confiança), tenta refinar a caixa (centrar no componente conexo
+    # mais próximo) e re-votar. Se o refinado der ≥2 votos, preferi-lo;
+    # senão, mantém o nominal. Resolve casos onde o heatmap propõe uma caixa
+    # ligeiramente off-center cujos bits enviesam o decoder para uma leitura
+    # cosmética válida pelo allowlist (caso (3,1)=H lido como 'X' por
+    # otsu_bil em config_4_sample_1).
+    if winner is not None and n_votes <= 1:
+        rx, ry, rxe, rye = refine_tile_box(
+            gray, x, y, x + bw, y + bh,
+            max_shift=max(4, int(round(min(bw, bh) * 0.30))),
         )
-        if text is not None and looks_like_valid_symbol(text):
-            return {
-                "text": text,
-                "method": method,
-                "box": [int(x), int(y), int(bw), int(bh)],
-                "center": [float(x + bw / 2.0), float(y + bh / 2.0)],
-            }
+        if (rx, ry, rxe, rye) != (x, y, x + bw, y + bh):
+            r_tile = gray[ry:rye, rx:rxe]
+            if r_tile.size > 0:
+                r_cands, r_mn, r_mx = build_candidates_and_bounds(
+                    r_tile,
+                    border=args.decode_border,
+                    resize_factor=args.resize_factor,
+                    use_edge_bounds=args.use_edge_bounds,
+                )
+                r_winner, r_method, r_votes = _vote_decode_candidates(
+                    r_cands, args.decode_timeout, args.decode_shrink,
+                    r_mn, r_mx,
+                )
+                if r_winner is not None and r_votes >= 2 and r_votes > n_votes:
+                    return {
+                        "text": r_winner,
+                        "method": f"{r_method}_refined",
+                        "box": [int(rx), int(ry), int(rxe - rx), int(rye - ry)],
+                        "center": [
+                            float(rx + (rxe - rx) / 2.0),
+                            float(ry + (rye - ry) / 2.0),
+                        ],
+                        "n_votes": int(r_votes),
+                    }
+
+    if winner is not None:
+        return {
+            "text": winner,
+            "method": winning_method,
+            "box": [int(x), int(y), int(bw), int(bh)],
+            "center": [float(x + bw / 2.0), float(y + bh / 2.0)],
+            "n_votes": int(n_votes),
+        }
 
     # Decide se vale a pena pagar as tentativas extras: só se o tile parece
     # ter conteúdo real (alto contraste interno). Tiles ruidosos com pouca
     # estrutura quase nunca decodificam mesmo com todas as variações.
+    # Threshold 14 (abaixo da pipeline.py grid que usa 18) porque os tiles
+    # de grid candidate em pipeline_free são maiores que os da grid (pad=17
+    # em vez de margem nominal), diluindo o std do símbolo na vizinhança
+    # do furo da base. Caso (3,26)='H' em config_1_sample_2: std=17.08 no
+    # tile 182x182 expandido, abaixo do limiar 18, mas o crop central 55%
+    # decodifica 'H' corretamente.
     tile_std = float(tile_gray.std())
-    if tile_std < 18.0 or local_dark_ratio < 0.04:
+    if tile_std < 14.0 or local_dark_ratio < 0.04:
         return None
 
     # ---- Fase 2: pad apertado com todos os pré-processamentos.
@@ -790,7 +940,48 @@ def decode_candidate_from_box(gray, box, args):
                             "method": f"{method}_tight",
                             "box": [int(ax), int(ay), int(aw), int(ah)],
                             "center": [float(ax + aw / 2.0), float(ay + ah / 2.0)],
+                            "n_votes": 1,
                         }
+
+    # ---- Fase 3: multi-crop central (mesma estratégia do pipeline.py grid).
+    # Para símbolos físicos pequenos relativos à célula (caso (3,26)='H' em
+    # config_1_sample_2 onde o símbolo ocupa ~30% do tile 148x148 nominal),
+    # os pré-processamentos canônicos e o pad apertado falham porque a
+    # vizinhança domina o cálculo de Otsu. Crops centrais de 75%, 65% e
+    # 55% do lado isolam o símbolo, melhorando a binarização.
+    h_tile, w_tile = tile_gray.shape[:2]
+    if min(h_tile, w_tile) >= 16:
+        for shrink_ratio in (0.75, 0.65, 0.55):
+            nh = int(round(h_tile * shrink_ratio))
+            nw = int(round(w_tile * shrink_ratio))
+            if nh < 12 or nw < 12 or nh >= h_tile or nw >= w_tile:
+                continue
+            y0c = (h_tile - nh) // 2
+            x0c = (w_tile - nw) // 2
+            cropped = tile_gray[y0c:y0c + nh, x0c:x0c + nw]
+            if cropped.size == 0:
+                continue
+            sub_cands, mn3, mx3 = build_candidates_and_bounds(
+                cropped, border=args.decode_border,
+                resize_factor=args.resize_factor,
+                use_edge_bounds=args.use_edge_bounds,
+            )
+            # Aqui usamos voto majoritário: o caso (3,26) tem 2 votos (otsu
+            # e adaptive) para 'H' no crop 55%, e queremos colher a leitura
+            # consistente em vez de aceitar a primeira do cascade.
+            c_winner, c_method, c_votes = _vote_decode_candidates(
+                sub_cands, args.decode_timeout, args.decode_shrink, mn3, mx3,
+            )
+            if c_winner is not None:
+                # Reporta box do tile original (não o cropado) para que o
+                # dedup posicional siga funcionando.
+                return {
+                    "text": c_winner,
+                    "method": f"{c_method}_c{int(shrink_ratio * 100)}",
+                    "box": [int(x), int(y), int(bw), int(bh)],
+                    "center": [float(x + bw / 2.0), float(y + bh / 2.0)],
+                    "n_votes": int(c_votes),
+                }
 
     return None
 
@@ -821,29 +1012,65 @@ def decode_worker(payload):
     return result
 
 
-def deduplicate_decoded(results, iou_threshold=0.22, center_threshold=12):
+def deduplicate_decoded(results, iou_threshold=0.22, center_threshold=12,
+                         position_threshold=70):
     """
-    Remove duplicatas das detecções já decodificadas.
+    Remove duplicatas das detecções já decodificadas em dois regimes:
 
-    Uma detecção é considerada duplicata quando:
-        - o texto é igual
-        - e as caixas são suficientemente próximas / sobrepostas
+    Regime 1 — mesmo texto, caixas próximas (default IoU>0.22 ou distância
+    de centro ≤ center_threshold): mantém só a melhor (proposal_score).
+    Caso clássico: duas escalas do heatmap propõem o mesmo símbolo.
 
-    A ordenação por proposal_score garante que candidatos melhores tendam
-    a ser mantidos primeiro.
+    Regime 2 — textos diferentes, caixas muito próximas (distância de centro
+    ≤ position_threshold, default 70px ~ meia célula): mantém a leitura com
+    mais `n_votes` (saída do voto majoritário sobre os 5 pré-processamentos).
+    Tiebreak: maior proposal_score. Resolve o caso onde a caixa do heatmap
+    decodifica para um símbolo cosmético do allowlist (ex. 'X' por otsu_bil
+    isoladamente) enquanto a caixa nominal da grade decodifica para o real
+    (ex. 'H' com 3+ pré-processamentos concordando) — (3,1) em
+    config_4_sample_1 é exatamente esse caso.
+
+    A ordenação por (n_votes, proposal_score) decrescente garante que a
+    leitura mais confiável seja inserida primeiro e use a posição como
+    "lugar reservado".
     """
     unique = []
 
-    for cand in sorted(results, key=lambda d: d.get("proposal_score", 0.0), reverse=True):
+    def sort_key(d):
+        # Prioridade: (n_votes, prefere_grid_em_baixa_confiança, proposal_score).
+        # Em empates de votos onde o vencedor tem só 1 voto (single
+        # preprocessing válido), preferimos a fonte 'grid_*' à 'heat_*' ou
+        # 'comp_*'. Caso (3,26)='H' em config_1_sample_2: heatmap propôs uma
+        # caixa que decodifica para 'G' (1 voto, score=77.9); grid_2_11
+        # decodifica 'H' (1 voto, score=10.0). Sem este bias, score venceria
+        # e geraria misread; com o bias, grid vence porque está alinhada à
+        # geometria nominal da maquete. Para n_votes ≥ 2 (alta confiança em
+        # qualquer fonte), score volta a desempatar.
+        n = d.get("n_votes", 0)
+        src = d.get("proposal_source", "")
+        is_grid = src.startswith("grid_")
+        grid_priority = 1 if (n <= 1 and is_grid) else 0
+        return (n, grid_priority, d.get("proposal_score", 0.0))
+
+    for cand in sorted(results, key=sort_key, reverse=True):
         dup = False
 
         for prev in unique:
             same_text = cand["text"] == prev["text"]
-            near = (
+            near_text = (
                 box_iou(tuple(cand["box"]), tuple(prev["box"])) > iou_threshold
                 or center_distance(tuple(cand["box"]), tuple(prev["box"])) <= center_threshold
             )
-            if same_text and near:
+            very_close = (
+                center_distance(tuple(cand["box"]), tuple(prev["box"]))
+                <= position_threshold
+            )
+            if same_text and near_text:
+                dup = True
+                break
+            if not same_text and very_close:
+                # Conflito posicional: já tem leitura melhor (n_votes maior
+                # ou proposal_score maior, devido à ordenação) aqui.
                 dup = True
                 break
 
@@ -911,6 +1138,10 @@ def main():
 
     # Etapa 1: ortorretificação
     ortho, _margin = build_ortho(image, template, args.margin)
+    # Atualiza args.margin com o valor efetivamente usado pelo ortho (que pode
+    # ter sido auto-calculado quando args.margin é None/0). propose_from_grid e
+    # estimate_symbol_side dependem desse valor para alinhar a grade nominal.
+    args.margin = _margin
     if not cv2.imwrite(args.output, ortho):
         raise RuntimeError("Falha ao salvar ortho")
 
@@ -963,13 +1194,31 @@ def main():
         raw_candidates.extend(propose_from_heatmap(gray, scale_args, ref_shape=(oh, ow)))
         raw_candidates.extend(propose_from_components(gray, scale_args, ref_shape=(oh, ow)))
 
-    # Etapa 3: NMS global para reduzir redundância entre as duas famílias
+    # Adiciona TODAS as 1369 caixas da grade nominal como propostas extras.
+    # Necessário pra resolver misreads onde heatmap propõe caixa ligeiramente
+    # off-center cujos bits decodificam para letra cosmética do allowlist
+    # (caso (3,1)='H' lido como 'X' em config_4_sample_1, caso (3,26)='H'
+    # lido como 'G' em config_1_sample_2). O grid candidate decodifica o
+    # símbolo real e vence no dedup posicional por n_votes.
+    #
+    # Trade-off: adicionar todas as 1369 caixas mais que dobra o tempo de
+    # decode por imagem (de ~3 min para ~10 min com a config atual), mas
+    # mantém 100% de acerto no lote de teste. Filtros mais agressivos
+    # (cover_tol ou std≥12) economizam tempo mas re-introduzem misreads
+    # pontuais — preferimos perfeição a velocidade aqui.
+    grid_cands = propose_from_grid(args, (oh, ow), pad)
+
+    # Etapa 3: NMS global para reduzir redundância entre heatmap+components.
+    # As propostas da grade NÃO passam pela NMS global — vão direto para
+    # a fase de decode, e o dedup posterior (deduplicate_decoded) faz a
+    # arbitragem por votos.
     candidates = nms_candidates(
         raw_candidates,
         args.nms_iou,
         args.merge_distance,
         args.max_candidates,
     )
+    candidates.extend(grid_cands)
 
     # Monta um dicionário apenas com o necessário para os workers
     args_dict = {

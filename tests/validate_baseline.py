@@ -109,7 +109,7 @@ def run_pipeline_grid(python, image_path, template_path):
                 f"pipeline.py falhou para {image_path}: {proc.stderr.strip() or proc.stdout.strip()}"
             )
         text = grid_out.read_text(encoding="utf-8")
-    return Counter(s for s in text.split() if s != "?")
+    return Counter(s for s in text.split() if s != "_")
 
 
 def run_pipeline_free(python, image_path, template_path):
@@ -149,7 +149,7 @@ def run_pipeline_pyapparq(python, image_path, template_path):
             f"sys.path.insert(0, {str(ECC200DECODE_ROOT / 'PyAppArq')!r})\n"
             "import pipeline as pl\n"
             f"_, grid, _ = pl.process_image({str(image_path)!r}, {str(template_path)!r})\n"
-            "syms = [s for row in grid for s in row if s != '?']\n"
+            "syms = [s for row in grid for s in row if s != '_']\n"
             "print(json.dumps(syms))\n"
         )
         cmd = [str(python), "-c", snippet]

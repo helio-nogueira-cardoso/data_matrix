@@ -31,8 +31,8 @@ from pipeline import COLS, ROWS, process_image
 @dataclass
 class GridCell:
     """Estado de exibicao de uma celula da grade."""
-    symbol: str = "-"
-    original_symbol: str = "-"  # valor decodificado, usado para detectar correcoes reais
+    symbol: str = "_"
+    original_symbol: str = "_"  # valor decodificado, usado para detectar correcoes reais
     is_uncertain: bool = False
     is_changed: bool = False
 
@@ -176,8 +176,8 @@ class App:
         for r in range(ROWS):
             for c in range(COLS):
                 sym = grid[r][c]
-                if sym == "?":
-                    cells[r][c] = GridCell(symbol="?", original_symbol="?",
+                if sym == "_":
+                    cells[r][c] = GridCell(symbol="_", original_symbol="_",
                                           is_uncertain=True)
                 else:
                     cells[r][c] = GridCell(symbol=sym, original_symbol=sym)
@@ -350,11 +350,9 @@ class CorrectionWindow:
             for c in range(COLS):
                 cell = self.cells[r][c]
 
-                # Pula celulas realmente vazias.
-                if cell.symbol == "-":
-                    continue
-                # Mostra "?" para celulas incertas para que o usuario possa corrigir.
-                if cell.symbol == "?" and not cell.is_uncertain:
+                # Pula celulas vazias confirmadas; mantem as incertas visiveis
+                # (renderizadas em vermelho) para que o usuario possa corrigir.
+                if cell.symbol == "_" and not cell.is_uncertain:
                     continue
 
                 cx, cy = self.centers.get((r, c), (0, 0))
@@ -415,7 +413,7 @@ class CorrectionWindow:
                     best_r, best_c = r, c
 
         cell = self.cells[best_r][best_c]
-        current = cell.symbol if cell.symbol != "-" else ""
+        current = cell.symbol if cell.symbol != "_" else ""
 
         # Recorta a celula em resolucao original para analise visual.
         cell_crop = self._crop_cell(best_r, best_c)
@@ -433,23 +431,20 @@ class CorrectionWindow:
 
         new_val = new_val.strip()
         if new_val == "":
-            new_val = "-"
+            new_val = "_"
         cell.symbol = new_val
 
         # So marca como alterado se diferente do valor original decodificado.
-        if new_val == cell.original_symbol:
-            cell.is_changed = False
-            cell.is_uncertain = (cell.original_symbol == "?")
-        else:
-            cell.is_changed = True
-            cell.is_uncertain = False
+        # Em ambos os casos a celula deixa de ser incerta: o usuario revisou-a.
+        cell.is_changed = (new_val != cell.original_symbol)
+        cell.is_uncertain = False
 
         self._drawing_area.queue_draw()
         self._update_status()
 
     def _update_status(self):
         decoded = sum(1 for row in self.cells for c in row
-                      if c.symbol not in ("?", "-"))
+                      if c.symbol != "_")
         uncertain = sum(1 for row in self.cells for c in row if c.is_uncertain)
         changed = sum(1 for row in self.cells for c in row if c.is_changed)
         self._status_label.set_text(

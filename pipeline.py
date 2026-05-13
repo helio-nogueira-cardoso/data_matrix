@@ -111,6 +111,16 @@ def parse_args():
         default=0,
         help="Deslocamento máximo em pixels para refinamento de célula (0 = automático)",
     )
+    # Fallback: roda o refinamento *apenas* nas células que ficaram '_' na
+    # primeira passada (caixa nominal). Recupera símbolos fisicamente
+    # deslocados sem prejudicar tiles bem-centralizados onde o refinamento
+    # cego (--refine-cells) atrapalha (caso 'h'/'V' em furos da base).
+    p.add_argument(
+        "--refine-fallback", dest="refine_fallback", action="store_true", default=True,
+    )
+    p.add_argument(
+        "--no-refine-fallback", dest="refine_fallback", action="store_false",
+    )
 
     # Modo de teste para uma célula específica da grade.
     p.add_argument(
@@ -620,7 +630,7 @@ def _decode_worker(job):
         use_edge_bounds=use_edge_bounds,
     )
 
-    return r, c, text if text is not None else "?"
+    return r, c, text if text is not None else "_"
 
 
 def decode_grid(
@@ -640,6 +650,7 @@ def decode_grid(
     use_edge_bounds,
     refine_cells=True,
     refine_max_shift=0,
+    refine_fallback=True,
 ):
     # Decodifica toda a grade 37x37 da imagem ortorretificada.
     #
@@ -648,12 +659,20 @@ def decode_grid(
     # truncado pela borda — todas têm exatamente o tamanho nominal com o
     # símbolo centralizado. Isso elimina a necessidade de padding auxiliar
     # e de votação de borda.
+    #
+    # refine_cells=True: roda refine_tile_box em todas as células antes do
+    # decode (regime atual quando --refine-cells é passado). refine_cells=
+    # False + refine_fallback=True (default): primeira passada na caixa
+    # nominal, segunda passada com refine nas células que ficaram '_'.
+    # Casa os dois regimes — nominal recupera tiles cujo refine atrapalha
+    # (h colado num furo da base que vira ponto parasita), refine recupera
+    # tiles fisicamente deslocados.
 
     height, width = ortho_bgr.shape[:2]
     ortho_gray = cv2.cvtColor(ortho_bgr, cv2.COLOR_BGR2GRAY)
     boxes = compute_grid_boxes(height, width, margin, rows=ROWS, cols=COLS)
 
-    if refine_cells and refine_max_shift <= 0 and boxes:
+    if (refine_cells or refine_fallback) and refine_max_shift <= 0 and boxes:
         _, _, bx0, by0, bx1, by1 = boxes[0]
         cell_side = max(1, min(bx1 - bx0, by1 - by0))
         refine_max_shift = max(4, int(round(cell_side * 0.30)))
@@ -686,8 +705,8 @@ def decode_grid(
             )
         )
 
-    # Inicializa a grade de saída com "?".
-    grid = [["?"] * COLS for _ in range(ROWS)]
+    # Inicializa a grade de saída com "_".
+    grid = [["_"] * COLS for _ in range(ROWS)]
 
     # Modo serial.
     if workers <= 1:
@@ -702,6 +721,46 @@ def decode_grid(
         with ProcessPoolExecutor(max_workers=workers) as ex:
             for r, c, value in ex.map(_decode_worker, jobs, chunksize=chunksize):
                 grid[r][c] = value
+
+    # Segunda passada: aplica o realinhamento só nas células que ficaram '_'.
+    # Útil para tiles fisicamente deslocados onde a caixa nominal corta parte
+    # do DataMatrix (vide config_1_sample_3 (37,27)='B': sem refine o decoder
+    # lê '@'/'65' — descartados pelo allowlist — e a célula vira '_'; com
+    # refine a caixa centraliza no símbolo e a leitura sai 'B').
+    if refine_fallback and not refine_cells and refine_max_shift > 0:
+        fallback_jobs = []
+        for r, c, x0, y0, x1, y1 in boxes:
+            if grid[r][c] != "_":
+                continue
+            rx0, ry0, rx1, ry1 = refine_tile_box(
+                ortho_gray, x0, y0, x1, y1, refine_max_shift,
+            )
+            if (rx0, ry0, rx1, ry1) == (x0, y0, x1, y1):
+                continue
+            tile_gray = crop_box(ortho_gray, rx0, ry0, rx1, ry1)
+            fallback_jobs.append(
+                (
+                    r, c, tile_gray,
+                    decode_timeout, decode_shrink, decode_border,
+                    resize_factor, skip_empty,
+                    empty_std_threshold, empty_dark_threshold,
+                    use_edge_bounds,
+                )
+            )
+
+        if fallback_jobs:
+            if workers <= 1:
+                for job in fallback_jobs:
+                    r, c, value = _decode_worker(job)
+                    if value != "_":
+                        grid[r][c] = value
+            else:
+                with ProcessPoolExecutor(max_workers=workers) as ex:
+                    for r, c, value in ex.map(
+                        _decode_worker, fallback_jobs, chunksize=chunksize
+                    ):
+                        if value != "_":
+                            grid[r][c] = value
 
     # A foto e capturada pela face inferior da maquete, entao o eixo
     # horizontal sai espelhado em relacao a vista de topo real. Espelhamos
@@ -833,6 +892,7 @@ def main():
         use_edge_bounds=a.use_edge_bounds,
         refine_cells=a.refine_cells,
         refine_max_shift=a.refine_max_shift,
+        refine_fallback=a.refine_fallback,
     )
 
     # Salva a grade textual final.

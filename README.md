@@ -165,10 +165,28 @@ Arquivo: `pipeline.py`
   borda — tenha recorte do tamanho nominal com o símbolo centralizado.
   Não há mais necessidade de votação de borda ou padding auxiliar para
   resolver clamping na margem.
+* O realinhamento da caixa — transladá-la para centralizar o componente
+  conexo escuro mais próximo do centro nominal — entra como **fallback**,
+  não passo obrigatório. Primeira passada decodifica todas as 1369 células
+  na caixa nominal; segunda passada, controlada por `--refine-fallback`
+  (default ligado), aplica o realinhamento apenas nas células que ficaram
+  `_`. Isso casa dois regimes que se prejudicavam mutuamente quando
+  aplicados a todas as células: a caixa nominal funciona melhor em tiles
+  bem centralizados (alguns `h` e `V` pioram porque o realinhamento puxa
+  a caixa para um furo da base que vira ponto parasita), e o realinhamento
+  recupera símbolos fisicamente deslocados que escapam do recorte nominal.
+  A condição de movimento da caixa (área do componente entre 5 % e 110 %
+  da do box, distância ≤ 30 % do passo, `std` da região ≥ 8) e o
+  `tile_looks_empty` interno garantem que tiles realmente vazios não
+  paguem custo nem produzam falsos positivos no fallback. Para o regime
+  antigo (refine em todas as células antes do decode) basta passar
+  `--refine-cells`; para desligar o fallback, `--no-refine-fallback`.
 * Quando todos os pré-processamentos canônicos falham e o tile parece ter
   conteúdo real (`std ≥ 18`), a decodificação tenta crops centrais a 75 %,
-  65 % e 55 % do lado da célula. Esse multi-crop recupera símbolos cuja
-  vizinhança ruidosa atrapalha sem precisar rotacionar nada.
+  65 % e 55 % do lado da célula. Esse multi-crop é complementar ao
+  realinhamento descrito acima: enquanto aquele trata de marcador
+  fisicamente deslocado, o multi-crop trata de zona silenciosa
+  contaminada por ruído ou por símbolo vizinho.
 
 ### Uso
 
@@ -182,7 +200,7 @@ python pipeline.py \
 
 ### Saída
 
-* `grid.txt` → matriz 37×37 com os símbolos detectados (`?` em cada célula
+* `grid.txt` → matriz 37×37 com os símbolos detectados (`_` em cada célula
   vazia), em **frame de topo** — colunas espelhadas em relação à foto, de
   modo que o arquivo bate com a vista superior real da maquete e com o
   JSON do PyAppArq. Os modos de debug (`--test-cell`, `--dump-elements`)
@@ -217,15 +235,44 @@ Arquivo: `pipeline_free.py`
    cantos da maquete).
 2. Padding lateral do ortho com `BORDER_REPLICATE` (`--edge-pad`, default
    80 px) para dar quiet zone aos símbolos colados nas bordas.
-3. Proposição de candidatos:
-   * heatmap local (variância + black-hat morfológico)
-   * componentes conectados sobre múltiplos mapas binários
-4. NMS global por IoU + distância entre centros.
-5. Decodificação com cascata de pré-processamentos (idem grid).
+3. Proposição de candidatos por três fontes complementares:
+   * heatmap local (variância + black-hat morfológico) em múltiplas
+     escalas — `--proposal-scales` default `"0.90"` adiciona uma escala
+     extra além da base `0.70`, recuperando tiles em paredes densas
+     onde a NMS interna do heatmap suprimia peaks vizinhos.
+   * componentes conectados sobre múltiplos mapas binários, com
+     `--max-candidates-per-family` 200 (equilibra cobertura e custo).
+   * **grade nominal 37×37** (`propose_from_grid`) como rede de
+     segurança — adiciona uma caixa em cada célula da grade idealizada.
+     Resolve dois tipos de falha que sobravam só com heatmap/components:
+     (a) misreads onde o heatmap propõe caixa off-center que decodifica
+     para letra cosmética válida pelo allowlist (caso `(3,1)='H'` lido
+     como `'X'` em `config_4_sample_1`), (b) FN em regiões densas onde
+     a NMS interna descarta candidatos.
+4. NMS global por IoU + distância entre centros — aplicada às fontes
+   heatmap/components; a grade nominal vai direto para o decode, e a
+   arbitragem entre fontes ocorre no dedup posterior por votos.
+5. Decodificação com voto majoritário entre os 5 pré-processamentos
+   (idem grid): roda `otsu`/`otsu_bil` primeiro, aceita se concordam
+   numa leitura válida pelo allowlist; caso contrário, roda os outros
+   três e escolhe a leitura mais frequente, com a ordem do cascade como
+   tiebreaker. O número de votos é exposto em `n_votes` no JSON.
 6. Multi-crop (pad apertado) como fallback legítimo para tiles cujo
    crop nominal não fechou e que ainda parecem ter conteúdo.
-7. Deduplicação por texto + proximidade.
-8. Ordenação espacial (linha → coluna).
+7. Fase 3 multi-crop central (75/65/55 % do lado do tile) — espelha o
+   multi-crop do `pipeline.py` grid e recupera símbolos pequenos
+   relativos à célula (caso `(3,26)='H'` em `config_1_sample_2`, onde
+   o símbolo ocupa ~30 % do tile e os pré-processamentos canônicos
+   falham por causa do excesso de vizinhança).
+8. Deduplicação posicional com bias para a grade em empates de baixa
+   confiança: candidatos a menos de 70 px (~meia célula) entre si
+   competem como mesma posição; ordem `(n_votes, prefere_grid_se_baixa
+   _confiança, proposal_score)`. Caso `(3,1)`: heatmap propõe `'X'`
+   com 1 voto e score 77.9; grid propõe `'H'` com 2 votos; vence
+   `'H'` por mais votos. Caso `(3,26)`: heatmap propõe `'G'` com 1
+   voto e score 77.9; grid propõe `'H'` com 1 voto e score 10; vence
+   `'H'` pelo bias grid no empate de votos baixos.
+9. Ordenação espacial (linha → coluna).
 
 ### Uso
 
@@ -271,6 +318,14 @@ Reescrita em Python da aplicação original AppArq (C++/Qt), com as seguintes mu
 * **Detecção de símbolos**: DataMatrix ECC200 (pylibdmtx) em vez de SIFT
 * **Câmera**: removida (apenas upload de imagem de smartphone)
 * **Saída**: mesmo formato JSON para integração com o Revit
+
+O `pipeline.py` interno usa a mesma estratégia híbrida do `pipeline.py`
+raiz: voto majoritário entre 5 pré-processamentos, `refine_cells=False`
+como default, `refine_fallback=True` rodando uma segunda passada com
+realinhamento apenas nas células que ficaram `_` na primeira. A
+configuração antiga (`refine_cells=True` em todas as células) degradava
+imagens onde tiles bem centralizados (`h`/`V`) tinham componentes
+parasitas (furo da base) competindo com o símbolo real.
 
 ### Estrutura
 
