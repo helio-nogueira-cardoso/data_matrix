@@ -108,7 +108,7 @@ cosméticas como `'N'`, `'I'` ou strings com caracteres de controle (`'H63E'`,
   "max_length": 4,
   "vocabulary": [
     "A","B","C","E","F","G","H","J",
-    "M","O","P","R","S","T","V","X",
+    "M","O","P","R","S","T","V",
     "h"
   ]
 }
@@ -246,8 +246,13 @@ Arquivo: `pipeline_free.py`
      segurança — adiciona uma caixa em cada célula da grade idealizada.
      Resolve dois tipos de falha que sobravam só com heatmap/components:
      (a) misreads onde o heatmap propõe caixa off-center que decodifica
-     para letra cosmética válida pelo allowlist (caso `(3,1)='H'` lido
-     como `'X'` em `config_4_sample_1`), (b) FN em regiões densas onde
+     para letra cosmética válida pelo allowlist (o caso histórico
+     `(3,1)='H'` lido como `'X'` em `config_4_sample_1` motivou também
+     a remoção do `X` do `symbols_config.json`, já que `X` é sentinela
+     interna do parser `objects_handler.py` e não corresponde a nenhum
+     elemento físico; hoje o filtro descarta esse falso positivo na
+     origem e o mecanismo de grade nominal segue resolvendo casos
+     análogos com outras letras), (b) FN em regiões densas onde
      a NMS interna descarta candidatos.
 4. NMS global por IoU + distância entre centros — aplicada às fontes
    heatmap/components; a grade nominal vai direto para o decode, e a
@@ -267,11 +272,13 @@ Arquivo: `pipeline_free.py`
 8. Deduplicação posicional com bias para a grade em empates de baixa
    confiança: candidatos a menos de 70 px (~meia célula) entre si
    competem como mesma posição; ordem `(n_votes, prefere_grid_se_baixa
-   _confiança, proposal_score)`. Caso `(3,1)`: heatmap propõe `'X'`
-   com 1 voto e score 77.9; grid propõe `'H'` com 2 votos; vence
-   `'H'` por mais votos. Caso `(3,26)`: heatmap propõe `'G'` com 1
-   voto e score 77.9; grid propõe `'H'` com 1 voto e score 10; vence
-   `'H'` pelo bias grid no empate de votos baixos.
+   _confiança, proposal_score)`. Caso `(3,26)`: heatmap propõe `'G'`
+   com 1 voto e score 77.9; grid propõe `'H'` com 1 voto e score 10;
+   vence `'H'` pelo bias grid no empate de votos baixos. (Em
+   `config_4_sample_1` o `(3,1)='H'` lido como `'X'` foi o caso que
+   também motivou a remoção do `X` do allowlist; após a remoção, leituras
+   espúrias desse símbolo já são descartadas antes da etapa de
+   deduplicação.)
 9. Ordenação espacial (linha → coluna).
 
 ### Uso

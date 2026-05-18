@@ -4,7 +4,7 @@
   "max_length": 4,
   "vocabulary": [
     "A", "B", "C", "E", "F", "G", "H", "J",
-    "M", "O", "P", "R", "S", "T", "V", "X",
+    "M", "O", "P", "R", "S", "T", "V",
     "h"
   ]
 }

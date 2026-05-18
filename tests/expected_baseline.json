@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Gabarito do lote atual de 8 imagens (imagem*.png e annotated*.png). Mesmas 42 letras em todas, dispostas em posicoes diferentes apenas pela rotacao.",
+  "description": "Gabarito do lote atual de 8 imagens (imagem*.png e annotated*.png). Mesmas 40 letras em todas, dispostas em posicoes diferentes apenas pela rotacao.",
   "images": [
     "imagem.png",
     "imagem_90.png",
@@ -11,7 +11,7 @@
     "annotated_180.png",
     "annotated_270.png"
   ],
-  "expected_count": 42,
+  "expected_count": 40,
   "expected_multiset": {
     "A": 2,
     "B": 1,
@@ -27,7 +27,6 @@
     "S": 3,
     "T": 2,
     "V": 2,
-    "X": 2,
     "h": 4
   }
 }
