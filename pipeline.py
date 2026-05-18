@@ -533,14 +533,27 @@ def decode_datamatrix_gray_with_method(
     # falhava em tiles onde o caminho otsu (CLAHE+sharpen) flipa bits dentro
     # do símbolo por causa do overshoot do sharpen — vide caso do DataMatrix
     # colado no furo da base que retornava "G" quando a leitura correta era "H".
+    #
+    # Também rastreamos leituras REJEITADAS pelo allowlist (ex. libdmtx
+    # retorna "X" ou "@123" para padrões ambíguos): se o vencedor sair com 1
+    # voto isolado contra ≥2 rejeitadas, o tile é tratado como ambíguo e
+    # forçado para "_". Caso típico: pegs cuja foto produzia "X" cosmético
+    # antes da remoção do allowlist e que, sob certas rotações, passam a ter
+    # 1 voto único em "P" entre os 5 pré-processamentos enquanto os outros
+    # 4 continuam lendo "X" rejeitado pelo allowlist.
     results = {}
+    rejected_count = 0
     for method, img in candidates[:2]:
         text = try_decode_text(
             img, timeout=timeout, shrink=shrink,
             min_edge=min_edge, max_edge=max_edge,
         )
-        if text is not None and looks_like_valid_symbol(text):
+        if text is None:
+            continue
+        if looks_like_valid_symbol(text):
             results[method] = text
+        else:
+            rejected_count += 1
 
     distinct = set(results.values())
     if len(distinct) == 1 and len(results) == 2:
@@ -554,12 +567,24 @@ def decode_datamatrix_gray_with_method(
             img, timeout=timeout, shrink=shrink,
             min_edge=min_edge, max_edge=max_edge,
         )
-        if text is not None and looks_like_valid_symbol(text):
+        if text is None:
+            continue
+        if looks_like_valid_symbol(text):
             results[method] = text
+        else:
+            rejected_count += 1
 
     if results:
         counts = Counter(results.values())
         max_count = max(counts.values())
+
+        # Filtro anti-fantasma: vencedor com 1 voto contra ≥2 rejeitadas é
+        # tratado como ambíguo. Garante que tiles cosméticos do libdmtx
+        # ("X" sob certas rotações) não vazem como letras válidas por
+        # azar de 1 pré-processamento isolado.
+        if max_count == 1 and rejected_count >= 2:
+            return None, None
+
         top = [t for t, c in counts.items() if c == max_count]
         if len(top) == 1:
             winner = top[0]
@@ -572,6 +597,15 @@ def decode_datamatrix_gray_with_method(
             m for m, _ in candidates if results.get(m) == winner
         )
         return winner, winning_method
+
+    # Filtro anti-fantasma extendido para o multi-crop: se a votação canônica
+    # produziu ≥2 leituras rejeitadas pelo allowlist e zero válidas, o tile é
+    # ambíguo o suficiente para confiar em "_". Sem isso, o caminho do
+    # multi-crop pega a primeira leitura válida de qualquer escala/método e
+    # vaza letras fantasmas (caso do extra P em imagem_90/270/annotated_90
+    # quando o vencedor canônico era X cosmético).
+    if rejected_count >= 2:
+        return None, None
 
     # Fallback legítimo: variação do tamanho do crop para células cujo
     # pré-processamento canônico falhou mas que parecem ter conteúdo real.

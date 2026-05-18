@@ -706,38 +706,58 @@ def _vote_decode_candidates(candidates, timeout, shrink, min_edge, max_edge):
     # (caminho rápido). Se discordam ou ambos falham, roda o resto e escolhe a
     # leitura mais frequente, com a ordem do cascade como tiebreaker.
     #
-    # Retorna (texto, metodo, n_votes) onde n_votes é o número de
-    # pré-processamentos que concordaram na leitura vencedora. Útil para
-    # comparar "confiança" entre voto na caixa nominal e na caixa refinada
-    # (caso de (3,1)=X em config_4_sample_1: nominal tem só 1 voto em 'X';
-    # refinada tem 2+ votos em 'H'). Retorna (None, None, 0) se nenhum
-    # pré-processamento der leitura válida.
+    # Retorna (texto, metodo, n_votes, rejected_count) onde:
+    # - n_votes é o número de pré-processamentos que concordaram na leitura
+    #   vencedora (útil para comparar confiança entre caixa nominal e refinada).
+    # - rejected_count é o número de pré-processamentos cujo texto foi
+    #   devolvido pelo libdmtx mas rejeitado pelo allowlist (ex. "X" ou
+    #   "@123" cosméticos).
+    #
+    # Filtro anti-fantasma interno: vencedor com 1 voto isolado contra ≥2
+    # rejeitadas devolve (None, None, 0, rejected_count). Espelha o
+    # comportamento de pipeline.py grid. O caller pode usar rejected_count
+    # para decidir se vale a pena tentar fases adicionais (pad apertado,
+    # multi-crop): se já houve evidência forte de ambiguidade (rejected≥2),
+    # subsequentes single-shot devem ser pulados.
     results = {}
+    rejected_count = 0
     for method, img in candidates[:2]:
         text = try_decode_text(
             img, timeout=timeout, shrink=shrink,
             min_edge=min_edge, max_edge=max_edge,
         )
-        if text is not None and looks_like_valid_symbol(text):
+        if text is None:
+            continue
+        if looks_like_valid_symbol(text):
             results[method] = text
+        else:
+            rejected_count += 1
 
     distinct = set(results.values())
     if len(distinct) == 1 and len(results) == 2:
         winner = next(iter(distinct))
         winning_method = next(m for m, _ in candidates if results.get(m) == winner)
-        return winner, winning_method, 2
+        return winner, winning_method, 2, rejected_count
 
     for method, img in candidates[2:]:
         text = try_decode_text(
             img, timeout=timeout, shrink=shrink,
             min_edge=min_edge, max_edge=max_edge,
         )
-        if text is not None and looks_like_valid_symbol(text):
+        if text is None:
+            continue
+        if looks_like_valid_symbol(text):
             results[method] = text
+        else:
+            rejected_count += 1
 
     if results:
         counts = Counter(results.values())
         max_count = max(counts.values())
+
+        if max_count == 1 and rejected_count >= 2:
+            return None, None, 0, rejected_count
+
         top = [t for t, c in counts.items() if c == max_count]
         if len(top) == 1:
             winner = top[0]
@@ -749,9 +769,9 @@ def _vote_decode_candidates(candidates, timeout, shrink, min_edge, max_edge):
         winning_method = next(
             m for m, _ in candidates if results.get(m) == winner
         )
-        return winner, winning_method, max_count
+        return winner, winning_method, max_count, rejected_count
 
-    return None, None, 0
+    return None, None, 0, rejected_count
 
 
 def decode_candidate_from_box(gray, box, args):
@@ -807,7 +827,7 @@ def decode_candidate_from_box(gray, box, args):
     # válida pelo allowlist, mesmo quando outros pré-processamentos votariam
     # diferente — caso típico: tile na borda do ortho onde otsu_bil lê 'X'
     # mas otsu/adaptive/sharp/gray leem 'H'.
-    winner, winning_method, n_votes = _vote_decode_candidates(
+    winner, winning_method, n_votes, fase1_rejected = _vote_decode_candidates(
         candidate_imgs, args.decode_timeout, args.decode_shrink,
         min_edge, max_edge,
     )
@@ -833,7 +853,7 @@ def decode_candidate_from_box(gray, box, args):
                     resize_factor=args.resize_factor,
                     use_edge_bounds=args.use_edge_bounds,
                 )
-                r_winner, r_method, r_votes = _vote_decode_candidates(
+                r_winner, r_method, r_votes, _ = _vote_decode_candidates(
                     r_cands, args.decode_timeout, args.decode_shrink,
                     r_mn, r_mx,
                 )
@@ -875,6 +895,19 @@ def decode_candidate_from_box(gray, box, args):
     # Símbolos cuja vizinhança contém ruído ou um símbolo adjacente decodificam
     # melhor com pad menor. Como esta fase só roda em tiles "promissores"
     # (filtro acima), o custo agregado fica controlado.
+    #
+    # Pulamos Fase 2 quando a Fase 1 acumulou MUITAS rejeições (≥4 dos 5
+    # pré-processamentos retornaram texto rejeitado pelo allowlist). Esse
+    # cenário é a assinatura típica de tile cosmético do libdmtx (caso "X"
+    # antes da remoção): praticamente todos os pré-processamentos concordam
+    # em uma leitura inválida. Cells legítimos de baixo contraste, por
+    # contraste, geram pad apertado com algumas rejeições mas também alguns
+    # None, ficando abaixo desse limiar. Threshold 4 acomoda o ruído normal
+    # do libdmtx em rotações sem bloquear cells reais como h/V que
+    # decodificam em Fase 2.
+    if fase1_rejected >= 4 and winner is None:
+        return None
+
     tight_pad = max(2, base_pad // 2)
     if tight_pad != base_pad:
         ax, ay, aw, ah = expand_box(box, tight_pad, w, h)
@@ -887,6 +920,12 @@ def decode_candidate_from_box(gray, box, args):
                     resize_factor=args.resize_factor,
                     use_edge_bounds=args.use_edge_bounds,
                 )
+                # Single-shot: aceita a primeira leitura válida. A Fase 1
+                # já filtrou ambiguidades canônicas via _vote_decode_candidates
+                # (vencedor com 1 voto contra ≥2 rejeições devolve None).
+                # Manter Fase 2 single-shot recupera símbolos legítimos de
+                # baixo contraste cuja Fase 1 não convergiu — caso típico:
+                # (31,14)=B em c6s1 (peg transparente, DataMatrix cinza-claro).
                 for method, img in alt_imgs:
                     text = try_decode_text(
                         img,
@@ -930,7 +969,7 @@ def decode_candidate_from_box(gray, box, args):
             # Aqui usamos voto majoritário: o caso (3,26) tem 2 votos (otsu
             # e adaptive) para 'H' no crop 55%, e queremos colher a leitura
             # consistente em vez de aceitar a primeira do cascade.
-            c_winner, c_method, c_votes = _vote_decode_candidates(
+            c_winner, c_method, c_votes, _ = _vote_decode_candidates(
                 sub_cands, args.decode_timeout, args.decode_shrink, mn3, mx3,
             )
             if c_winner is not None:
