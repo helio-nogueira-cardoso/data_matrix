@@ -91,9 +91,15 @@ def parse_args():
     p.add_argument("--chunksize", type=int, default=64)
 
     # Atalhos opcionais para acelerar:
-    # - skip-empty: pula tiles que parecem vazios (ligado por padrão)
+    # - skip-empty: pula tiles que parecem vazios (desligado por padrão).
+    #   O filtro corta tiles com std<7 ou dark_ratio<0.06; embora útil em
+    #   tese para economizar tempo em fundo uniforme, na prática quase nada
+    #   é cortado (fundos da maquete são heterogêneos) e ele bloqueia exatamente
+    #   símbolos físicos de baixíssimo contraste — pegs transparentes com
+    #   DataMatrix cinza-claro do config_6 caem abaixo de 0.06 de dark_ratio
+    #   apesar de decodificarem com 5/5 votos unânimes nos pré-processamentos.
     # - use-edge-bounds: restringe o tamanho esperado do símbolo no decoder
-    p.add_argument("--skip-empty", dest="skip_empty", action="store_true", default=True)
+    p.add_argument("--skip-empty", dest="skip_empty", action="store_true", default=False)
     p.add_argument("--no-skip-empty", dest="skip_empty", action="store_false")
     p.add_argument("--empty-std-threshold", type=float, default=7.0)
     p.add_argument("--empty-dark-threshold", type=float, default=0.06)
@@ -125,7 +131,9 @@ def parse_args():
     # busca picos locais do mapa de score (desvio padrao local + blackhat)
     # numa vizinhanca ampliada e tenta decodificar em cada pico. Recupera
     # codigos fisicamente deslocados alem do raio do refine_tile_box, sem
-    # roubar simbolo de celulas ja decodificadas.
+    # roubar simbolo de celulas ja decodificadas. Opt-in: o caminho normal
+    # (grid + refine_fallback + skip_empty=False) ja fecha 100% nos 16
+    # samples atuais; mantemos como rede de seguranca para imagens futuras.
     p.add_argument(
         "--heatmap-fallback", dest="heatmap_fallback", action="store_true", default=False,
     )

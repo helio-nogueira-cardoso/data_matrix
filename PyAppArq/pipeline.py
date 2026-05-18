@@ -572,9 +572,11 @@ def _decode_worker(job):
 
 def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
                 decode_border=10, resize_factor=2.0, workers=None,
-                chunksize=16, skip_empty=True, use_edge_bounds=False,
+                chunksize=16, skip_empty=False, use_edge_bounds=False,
                 refine_cells=False, refine_max_shift=0,
-                refine_fallback=True):
+                refine_fallback=True, heatmap_fallback=False,
+                heatmap_search_radius_factor=1.0,
+                empty_std_threshold=7.0, empty_dark_threshold=0.06):
     """Decodifica a grade 37x37 completa. Retorna lista 2D de simbolos.
 
     refine_cells=True aplica o realinhamento da caixa (centra no componente
@@ -585,6 +587,13 @@ def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
     funciona melhor em símbolos bem centralizados (alguns tiles 'h' e 'V'
     pioram com realinhamento por causa de pontos parasitas), e o realinhado
     recupera símbolos fisicamente deslocados que escapam do recorte nominal.
+
+    heatmap_fallback=False (padrão) importa pipeline_free do diretório pai
+    e usa as propostas baseadas em heatmap de score local + componentes
+    conexos como ultima rede. Opt-in porque o caminho normal (grid +
+    refine_fallback + skip_empty=False) ja fecha 100% nos 16 samples atuais.
+    Soh dispara se ainda houver celulas '_' que parecam ter conteudo real
+    (gate baseado em std e dark ratio).
     """
     if workers is None:
         workers = max(1, (os.cpu_count() or 1) - 1)
@@ -655,6 +664,128 @@ def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
                         if value != "_":
                             grid[r][c] = value
 
+    # Terceira passada: heatmap fallback. Importa pipeline_free do diretório
+    # pai (ECC200Decode/pipeline_free.py) e usa as propostas baseadas em
+    # heatmap de score local + componentes conexos. Necessario para fechar
+    # config_6 a 100/100: pegs transparentes com DataMatrix cinza-claro caem
+    # abaixo do limiar de "celula nao vazia" do filtro padrao, e o refine
+    # nao traz alteração suficiente; o proposal do heatmap acha a caixa
+    # certa e a votação nos 5 pre-processamentos converge unanime.
+    if heatmap_fallback and boxes:
+        promising_count = 0
+        for r, c, x0, y0, x1, y1 in boxes:
+            if grid[r][c] != "_":
+                continue
+            tile = ortho_gray[y0:y1, x0:x1]
+            if tile.size == 0:
+                continue
+            if float(tile.std()) > 18.0 and float((tile < 180).mean()) > 0.05:
+                promising_count += 1
+
+        empty_cells = [
+            (r, c, x0, y0, x1, y1)
+            for r, c, x0, y0, x1, y1 in boxes
+            if grid[r][c] == "_"
+        ]
+
+        if promising_count >= 3 and empty_cells:
+            from argparse import Namespace
+            import sys as _sys
+            from pathlib import Path as _Path
+            _PARENT = _Path(__file__).resolve().parent.parent
+            if str(_PARENT) not in _sys.path:
+                _sys.path.insert(0, str(_PARENT))
+            import pipeline_free as pf
+
+            _, _, bx0, by0, bx1, by1 = boxes[0]
+            cell_side = max(1, min(bx1 - bx0, by1 - by0))
+            search_radius = max(8, int(round(cell_side * heatmap_search_radius_factor)))
+
+            edge_pad = 80
+            ns = Namespace(
+                rows=ROWS, cols=COLS, margin=margin,
+                proposal_scale=0.70, proposal_scales="0.90",
+                window_size_ratios="0.70,0.90,1.10",
+                heatmap_threshold=0.10, min_local_dark_ratio=0.025,
+                nms_iou=0.30, merge_distance=12,
+                max_candidates_per_family=200, max_candidates=20000,
+                decode_timeout=decode_timeout, decode_shrink=decode_shrink,
+                decode_border=decode_border, resize_factor=resize_factor,
+                use_edge_bounds=use_edge_bounds, pad=8,
+                skip_empty=skip_empty, empty_std_threshold=empty_std_threshold,
+                empty_dark_threshold=empty_dark_threshold,
+                edge_pad=edge_pad,
+            )
+
+            padded = cv2.copyMakeBorder(
+                ortho_gray, edge_pad, edge_pad, edge_pad, edge_pad,
+                cv2.BORDER_REPLICATE,
+            )
+            oh, ow = ortho_gray.shape[:2]
+
+            raw_cands = []
+            scales = [ns.proposal_scale]
+            extra = [float(s) for s in ns.proposal_scales.split(",") if s.strip()]
+            for s in extra:
+                if all(abs(s - existing) > 1e-6 for existing in scales):
+                    scales.append(s)
+            for scale in scales:
+                sa = Namespace(**vars(ns))
+                sa.proposal_scale = scale
+                raw_cands.extend(pf.propose_from_heatmap(padded, sa, ref_shape=(oh, ow)))
+                raw_cands.extend(pf.propose_from_components(padded, sa, ref_shape=(oh, ow)))
+            cands = pf.nms_candidates(raw_cands, ns.nms_iou, ns.merge_distance, ns.max_candidates)
+
+            decoded_centers = [
+                ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+                for r, c, x0, y0, x1, y1 in boxes
+                if grid[r][c] != "_"
+            ]
+
+            for cand in cands:
+                bx, by, bw, bh = cand["box"]
+                cx_padded = bx + bw / 2.0
+                cy_padded = by + bh / 2.0
+                cx_ortho = cx_padded - edge_pad
+                cy_ortho = cy_padded - edge_pad
+
+                steal = False
+                for (dcx, dcy) in decoded_centers:
+                    if abs(cx_ortho - dcx) < cell_side * 0.4 and abs(cy_ortho - dcy) < cell_side * 0.4:
+                        steal = True
+                        break
+                if steal:
+                    continue
+
+                best_cell = None
+                best_dist = search_radius * search_radius
+                for (r, c, x0, y0, x1, y1) in empty_cells:
+                    if grid[r][c] != "_":
+                        continue
+                    cx_cell = (x0 + x1) / 2.0
+                    cy_cell = (y0 + y1) / 2.0
+                    d2 = (cx_ortho - cx_cell) ** 2 + (cy_ortho - cy_cell) ** 2
+                    if d2 < best_dist:
+                        best_dist = d2
+                        best_cell = (r, c)
+                if best_cell is None:
+                    continue
+                if grid[best_cell[0]][best_cell[1]] != "_":
+                    continue
+
+                result = pf.decode_candidate_from_box(padded, cand["box"], ns)
+                if result is None:
+                    continue
+                text = result.get("text")
+                if text is None or text == "_":
+                    continue
+                grid[best_cell[0]][best_cell[1]] = text
+                bxr, byr, bwr, bhr = result["box"]
+                decoded_centers.append((
+                    bxr + bwr / 2.0 - edge_pad,
+                    byr + bhr / 2.0 - edge_pad,
+                ))
+
     return grid
 
 
@@ -664,9 +795,11 @@ def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
 
 def process_image(image_path, template_path, margin=None, decode_timeout=60,
                   decode_shrink=2, decode_border=10, resize_factor=2.0,
-                  workers=None, chunksize=16, skip_empty=True,
+                  workers=None, chunksize=16, skip_empty=False,
                   use_edge_bounds=False, refine_cells=False,
                   refine_max_shift=0, refine_fallback=True,
+                  heatmap_fallback=False, heatmap_search_radius_factor=1.0,
+                  empty_std_threshold=7.0, empty_dark_threshold=0.06,
                   progress_callback=None):
     """Executa o pipeline completo sobre uma imagem.
 
@@ -710,6 +843,10 @@ def process_image(image_path, template_path, margin=None, decode_timeout=60,
         refine_cells=refine_cells,
         refine_max_shift=refine_max_shift,
         refine_fallback=refine_fallback,
+        heatmap_fallback=heatmap_fallback,
+        heatmap_search_radius_factor=heatmap_search_radius_factor,
+        empty_std_threshold=empty_std_threshold,
+        empty_dark_threshold=empty_dark_threshold,
     )
 
     height, width = ortho.shape[:2]
