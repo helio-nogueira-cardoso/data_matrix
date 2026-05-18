@@ -121,6 +121,35 @@ def parse_args():
     p.add_argument(
         "--no-refine-fallback", dest="refine_fallback", action="store_false",
     )
+    # Fallback final: para celulas ainda '_' apos as duas passadas acima,
+    # busca picos locais do mapa de score (desvio padrao local + blackhat)
+    # numa vizinhanca ampliada e tenta decodificar em cada pico. Recupera
+    # codigos fisicamente deslocados alem do raio do refine_tile_box, sem
+    # roubar simbolo de celulas ja decodificadas.
+    p.add_argument(
+        "--heatmap-fallback", dest="heatmap_fallback", action="store_true", default=True,
+    )
+    p.add_argument(
+        "--no-heatmap-fallback", dest="heatmap_fallback", action="store_false",
+    )
+    p.add_argument(
+        "--heatmap-search-radius-factor",
+        type=float,
+        default=0.75,
+        help="Fator do passo da grade que define o raio de busca de picos por celula (0.75 = ate 3/4 do passo).",
+    )
+    p.add_argument(
+        "--heatmap-min-score",
+        type=int,
+        default=70,
+        help="Score minimo (0-255) para considerar um pico do heatmap como candidato.",
+    )
+    p.add_argument(
+        "--heatmap-num-peaks",
+        type=int,
+        default=4,
+        help="Numero maximo de picos por celula testados no heatmap fallback.",
+    )
 
     # Modo de teste para uma célula específica da grade.
     p.add_argument(
@@ -329,6 +358,51 @@ def refine_tile_box(gray, x0, y0, x1, y1, max_shift):
     nx0 = max(0, min(w - bw, int(round(cx_full - bw / 2.0))))
     ny0 = max(0, min(h - bh, int(round(cy_full - bh / 2.0))))
     return nx0, ny0, nx0 + bw, ny0 + bh
+
+
+def local_score_map(gray):
+    # Mapa de score local combinando desvio padrao local com blackhat morfologico.
+    # Regioes potencialmente contendo um DataMatrix tendem a ter score alto.
+    blur = cv2.GaussianBlur(gray, (0, 0), 1.0)
+    mean = cv2.boxFilter(blur, ddepth=-1, ksize=(11, 11), normalize=True)
+    sqmean = cv2.boxFilter(
+        (blur.astype(np.float32) ** 2),
+        ddepth=-1,
+        ksize=(11, 11),
+        normalize=True,
+    )
+    var = np.maximum(0.0, sqmean - mean.astype(np.float32) ** 2)
+    std = np.sqrt(var)
+    std = cv2.normalize(std, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    blackhat = cv2.morphologyEx(blur, cv2.MORPH_BLACKHAT, np.ones((9, 9), np.uint8))
+    blackhat = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    return cv2.addWeighted(std, 0.55, blackhat, 0.45, 0)
+
+
+def find_local_peaks(score_map, cx, cy, radius, side, num_peaks=4, min_score=70):
+    # Encontra ate num_peaks maximos locais do score_map dentro de raio em
+    # torno de (cx, cy). Cada pico encontrado e suprimido para evitar pegar
+    # o mesmo de novo. Retorna lista ordenada por score decrescente.
+    h, w = score_map.shape[:2]
+    sx0 = max(0, int(cx - radius))
+    sy0 = max(0, int(cy - radius))
+    sx1 = min(w, int(cx + radius))
+    sy1 = min(h, int(cy + radius))
+    if sx1 - sx0 < 4 or sy1 - sy0 < 4:
+        return []
+    roi = score_map[sy0:sy1, sx0:sx1].copy()
+    k = max(3, side // 8) | 1
+    smooth = cv2.GaussianBlur(roi, (k, k), 0)
+    peaks = []
+    suppress_r = max(side // 3, 8)
+    for _ in range(num_peaks):
+        _, mx, _, mloc = cv2.minMaxLoc(smooth)
+        if mx < min_score:
+            break
+        px, py = mloc
+        peaks.append((sx0 + px, sy0 + py, float(mx)))
+        cv2.circle(smooth, (px, py), suppress_r, 0, -1)
+    return peaks
 
 
 def build_candidates_and_bounds(tile_gray, border=10, resize_factor=2.0, use_edge_bounds=False):
@@ -651,6 +725,10 @@ def decode_grid(
     refine_cells=True,
     refine_max_shift=0,
     refine_fallback=True,
+    heatmap_fallback=True,
+    heatmap_search_radius_factor=0.75,
+    heatmap_min_score=70,
+    heatmap_num_peaks=4,
 ):
     # Decodifica toda a grade 37x37 da imagem ortorretificada.
     #
@@ -675,7 +753,7 @@ def decode_grid(
     if (refine_cells or refine_fallback) and refine_max_shift <= 0 and boxes:
         _, _, bx0, by0, bx1, by1 = boxes[0]
         cell_side = max(1, min(bx1 - bx0, by1 - by0))
-        refine_max_shift = max(4, int(round(cell_side * 0.30)))
+        refine_max_shift = max(4, int(round(cell_side * 0.50)))
 
     out_dir = Path(elements_dir)
     if dump_elements:
@@ -761,6 +839,127 @@ def decode_grid(
                     ):
                         if value != "_":
                             grid[r][c] = value
+
+    # Terceira passada: heatmap fallback usando as logicas de proposicao do
+    # pipeline_free (heatmap + componentes conectados). Soh dispara se ainda
+    # houver celulas '_' que parecam ter conteudo real (filtro por std + dark
+    # ratio), evitando o custo do propose global em configs onde grid + refine
+    # ja resolveram tudo. Import lazy para evitar ciclo de import.
+    if heatmap_fallback and boxes:
+        # Gate: soh dispara o propose global do pipeline_free se ainda houver
+        # celulas '_' que pareçam ter conteudo real (alto std + dark ratio).
+        # Configs onde grid + refine ja resolveram tudo nao pagam o overhead.
+        promising_count = 0
+        for r, c, x0, y0, x1, y1 in boxes:
+            if grid[r][c] != "_":
+                continue
+            tile = ortho_gray[y0:y1, x0:x1]
+            if tile.size == 0:
+                continue
+            if float(tile.std()) > 18.0 and float((tile < 180).mean()) > 0.05:
+                promising_count += 1
+
+        # Lista de TODAS as celulas '_' (nao filtrada por "promising") para o
+        # mapeamento candidato->celula. Mesmo celulas que nao "parecem promissoras"
+        # podem decodificar se o proposal encontrar o codigo no lugar certo.
+        empty_cells = [
+            (r, c, x0, y0, x1, y1)
+            for r, c, x0, y0, x1, y1 in boxes
+            if grid[r][c] == "_"
+        ]
+
+        if promising_count >= 3 and empty_cells:
+            from argparse import Namespace
+            import pipeline_free as pf
+
+            _, _, bx0, by0, bx1, by1 = boxes[0]
+            cell_side = max(1, min(bx1 - bx0, by1 - by0))
+            search_radius = max(8, int(round(cell_side * heatmap_search_radius_factor)))
+
+            edge_pad = 80
+            ns = Namespace(
+                rows=ROWS, cols=COLS, margin=margin,
+                proposal_scale=0.70, proposal_scales="0.90",
+                window_size_ratios="0.70,0.90,1.10",
+                heatmap_threshold=0.10, min_local_dark_ratio=0.025,
+                nms_iou=0.30, merge_distance=12,
+                max_candidates_per_family=200, max_candidates=20000,
+                decode_timeout=decode_timeout, decode_shrink=decode_shrink,
+                decode_border=decode_border, resize_factor=resize_factor,
+                use_edge_bounds=use_edge_bounds, pad=8,
+                skip_empty=skip_empty, empty_std_threshold=empty_std_threshold,
+                empty_dark_threshold=empty_dark_threshold,
+                edge_pad=edge_pad,
+            )
+
+            padded = cv2.copyMakeBorder(
+                ortho_gray, edge_pad, edge_pad, edge_pad, edge_pad,
+                cv2.BORDER_REPLICATE,
+            )
+            oh, ow = ortho_gray.shape[:2]
+
+            raw_cands = []
+            scales = [ns.proposal_scale]
+            extra = [float(s) for s in ns.proposal_scales.split(",") if s.strip()]
+            for s in extra:
+                if all(abs(s - existing) > 1e-6 for existing in scales):
+                    scales.append(s)
+            for scale in scales:
+                sa = Namespace(**vars(ns))
+                sa.proposal_scale = scale
+                raw_cands.extend(pf.propose_from_heatmap(padded, sa, ref_shape=(oh, ow)))
+                raw_cands.extend(pf.propose_from_components(padded, sa, ref_shape=(oh, ow)))
+            cands = pf.nms_candidates(raw_cands, ns.nms_iou, ns.merge_distance, ns.max_candidates)
+
+            decoded_centers = [
+                ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+                for r, c, x0, y0, x1, y1 in boxes
+                if grid[r][c] != "_"
+            ]
+
+            for cand in cands:
+                bx, by, bw, bh = cand["box"]
+                cx_padded = bx + bw / 2.0
+                cy_padded = by + bh / 2.0
+                cx_ortho = cx_padded - edge_pad
+                cy_ortho = cy_padded - edge_pad
+
+                steal = False
+                for (dcx, dcy) in decoded_centers:
+                    if abs(cx_ortho - dcx) < cell_side * 0.4 and abs(cy_ortho - dcy) < cell_side * 0.4:
+                        steal = True
+                        break
+                if steal:
+                    continue
+
+                best_cell = None
+                best_dist = search_radius * search_radius
+                for (r, c, x0, y0, x1, y1) in empty_cells:
+                    if grid[r][c] != "_":
+                        continue
+                    cx_cell = (x0 + x1) / 2.0
+                    cy_cell = (y0 + y1) / 2.0
+                    d2 = (cx_ortho - cx_cell) ** 2 + (cy_ortho - cy_cell) ** 2
+                    if d2 < best_dist:
+                        best_dist = d2
+                        best_cell = (r, c)
+                if best_cell is None:
+                    continue
+                if grid[best_cell[0]][best_cell[1]] != "_":
+                    continue
+
+                result = pf.decode_candidate_from_box(padded, cand["box"], ns)
+                if result is None:
+                    continue
+                text = result.get("text")
+                if text is None or text == "_":
+                    continue
+                grid[best_cell[0]][best_cell[1]] = text
+                bxr, byr, bwr, bhr = result["box"]
+                decoded_centers.append((
+                    bxr + bwr / 2.0 - edge_pad,
+                    byr + bhr / 2.0 - edge_pad,
+                ))
 
     # A foto e capturada pela face inferior da maquete, entao o eixo
     # horizontal sai espelhado em relacao a vista de topo real. Espelhamos
@@ -893,6 +1092,10 @@ def main():
         refine_cells=a.refine_cells,
         refine_max_shift=a.refine_max_shift,
         refine_fallback=a.refine_fallback,
+        heatmap_fallback=a.heatmap_fallback,
+        heatmap_search_radius_factor=a.heatmap_search_radius_factor,
+        heatmap_min_score=a.heatmap_min_score,
+        heatmap_num_peaks=a.heatmap_num_peaks,
     )
 
     # Salva a grade textual final.
