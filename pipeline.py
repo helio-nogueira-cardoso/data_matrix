@@ -753,7 +753,7 @@ def decode_grid(
     if (refine_cells or refine_fallback) and refine_max_shift <= 0 and boxes:
         _, _, bx0, by0, bx1, by1 = boxes[0]
         cell_side = max(1, min(bx1 - bx0, by1 - by0))
-        refine_max_shift = max(4, int(round(cell_side * 0.50)))
+        refine_max_shift = max(4, int(round(cell_side * 0.30)))
 
     out_dir = Path(elements_dir)
     if dump_elements:
