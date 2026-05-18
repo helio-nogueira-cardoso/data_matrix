@@ -179,7 +179,6 @@ from pipeline import (
     tile_looks_empty,
     looks_like_valid_symbol,
     refine_tile_box,
-    compute_grid_boxes,
 )
 
 # Quantidade de linhas e colunas usadas como referência de escala.
@@ -254,13 +253,6 @@ def parse_args():
     # (escala 0.50 testada introduzia 'F'→'E' em imagem_90; 0.90 não).
     p.add_argument("--proposal-scales", default="0.90")
     p.add_argument("--max-candidates", type=int, default=20000)
-    # Cap por família (heatmap e components, antes do NMS global). Default 200:
-    # com a adição de propose_from_grid como terceira fonte cobrindo as
-    # 1369 células nominais, podemos manter o heatmap/components em 200 por
-    # família — qualquer célula que o NMS interno descarte (e que tenha
-    # símbolo real) cai no grid candidate e é recuperada pelo dedup
-    # posicional. Manter 500 (valor anterior) só inflava o tempo de decode
-    # sem ganho final em acurácia depois do grid.
     p.add_argument("--max-candidates-per-family", type=int, default=200)
     p.add_argument("--nms-iou", type=float, default=0.30)
     p.add_argument("--merge-distance", type=int, default=12)
@@ -707,37 +699,6 @@ def propose_from_components(gray, args, ref_shape=None):
     return all_cands
 
 
-def propose_from_grid(args, ortho_shape, edge_pad):
-    """Propostas alinhadas à grade nominal 37x37 (mesma geometria que
-    pipeline.py grid).
-
-    Cobre regiões onde heatmap e components propõem caixas off-center
-    cujos bits decodificam para um símbolo válido pelo allowlist mas
-    diferente do real (caso (3,1)='H' lido como 'X' por otsu_bil em
-    config_4_sample_1). Para esses tiles, a caixa nominal da grade
-    decodifica corretamente, e a deduplicação posterior (por posição,
-    preferindo a leitura com mais votos do voto majoritário) escolhe a
-    leitura certa entre as duas.
-
-    Score baixo (~10) faz com que essas propostas só vençam o dedup
-    quando têm mais votos que o heatmap concorrente.
-    """
-    oh, ow = ortho_shape
-    boxes = compute_grid_boxes(oh, ow, args.margin, rows=args.rows, cols=args.cols)
-    candidates = []
-    for r, c, x0, y0, x1, y1 in boxes:
-        px = x0 + edge_pad
-        py = y0 + edge_pad
-        pw = x1 - x0
-        ph = y1 - y0
-        candidates.append({
-            "box": (int(px), int(py), int(pw), int(ph)),
-            "score": 10.0,
-            "source": f"grid_{r}_{c}",
-        })
-    return candidates
-
-
 def _vote_decode_candidates(candidates, timeout, shrink, min_edge, max_edge):
     # Voto majoritário entre pré-processamentos. Mesma lógica de
     # pipeline.py::decode_datamatrix_gray_with_method: roda os dois primeiros
@@ -1037,20 +998,13 @@ def deduplicate_decoded(results, iou_threshold=0.22, center_threshold=12,
     unique = []
 
     def sort_key(d):
-        # Prioridade: (n_votes, prefere_grid_em_baixa_confiança, proposal_score).
-        # Em empates de votos onde o vencedor tem só 1 voto (single
-        # preprocessing válido), preferimos a fonte 'grid_*' à 'heat_*' ou
-        # 'comp_*'. Caso (3,26)='H' em config_1_sample_2: heatmap propôs uma
-        # caixa que decodifica para 'G' (1 voto, score=77.9); grid_2_11
-        # decodifica 'H' (1 voto, score=10.0). Sem este bias, score venceria
-        # e geraria misread; com o bias, grid vence porque está alinhada à
-        # geometria nominal da maquete. Para n_votes ≥ 2 (alta confiança em
-        # qualquer fonte), score volta a desempatar.
+        # Prioridade: (n_votes, proposal_score).
+        # Bias para a grade nominal em empates de baixa confianca foi removido
+        # junto com a adicao das propostas grid_*: a abordagem livre nao deve
+        # assumir nada sobre a grade. Para n_votes >= 2 (alta confianca em
+        # qualquer fonte), score continua desempatando.
         n = d.get("n_votes", 0)
-        src = d.get("proposal_source", "")
-        is_grid = src.startswith("grid_")
-        grid_priority = 1 if (n <= 1 and is_grid) else 0
-        return (n, grid_priority, d.get("proposal_score", 0.0))
+        return (n, d.get("proposal_score", 0.0))
 
     for cand in sorted(results, key=sort_key, reverse=True):
         dup = False
@@ -1139,8 +1093,9 @@ def main():
     # Etapa 1: ortorretificação
     ortho, _margin = build_ortho(image, template, args.margin)
     # Atualiza args.margin com o valor efetivamente usado pelo ortho (que pode
-    # ter sido auto-calculado quando args.margin é None/0). propose_from_grid e
-    # estimate_symbol_side dependem desse valor para alinhar a grade nominal.
+    # ter sido auto-calculado quando args.margin e None/0). estimate_symbol_side
+    # depende desse valor para escolher escalas de janela compativeis com o
+    # passo nominal da grade no plano de saida.
     args.margin = _margin
     if not cv2.imwrite(args.output, ortho):
         raise RuntimeError("Falha ao salvar ortho")
@@ -1194,31 +1149,18 @@ def main():
         raw_candidates.extend(propose_from_heatmap(gray, scale_args, ref_shape=(oh, ow)))
         raw_candidates.extend(propose_from_components(gray, scale_args, ref_shape=(oh, ow)))
 
-    # Adiciona TODAS as 1369 caixas da grade nominal como propostas extras.
-    # Necessário pra resolver misreads onde heatmap propõe caixa ligeiramente
-    # off-center cujos bits decodificam para letra cosmética do allowlist
-    # (caso (3,1)='H' lido como 'X' em config_4_sample_1, caso (3,26)='H'
-    # lido como 'G' em config_1_sample_2). O grid candidate decodifica o
-    # símbolo real e vence no dedup posicional por n_votes.
-    #
-    # Trade-off: adicionar todas as 1369 caixas mais que dobra o tempo de
-    # decode por imagem (de ~3 min para ~10 min com a config atual), mas
-    # mantém 100% de acerto no lote de teste. Filtros mais agressivos
-    # (cover_tol ou std≥12) economizam tempo mas re-introduzem misreads
-    # pontuais — preferimos perfeição a velocidade aqui.
-    grid_cands = propose_from_grid(args, (oh, ow), pad)
-
-    # Etapa 3: NMS global para reduzir redundância entre heatmap+components.
-    # As propostas da grade NÃO passam pela NMS global — vão direto para
-    # a fase de decode, e o dedup posterior (deduplicate_decoded) faz a
-    # arbitragem por votos.
+    # Etapa 3: NMS global para reduzir redundancia entre heatmap+components.
+    # A abordagem livre nao deve assumir nada sobre a grade nominal, ja que
+    # ela serve como prova de conceito para cenarios futuros em que os codigos
+    # nao estarao em posicoes discretizadas. As candidatas da grade que antes
+    # eram adicionadas como rede de seguranca foram removidas em prol da
+    # honestidade metodologica.
     candidates = nms_candidates(
         raw_candidates,
         args.nms_iou,
         args.merge_distance,
         args.max_candidates,
     )
-    candidates.extend(grid_cands)
 
     # Monta um dicionário apenas com o necessário para os workers
     args_dict = {
