@@ -127,7 +127,7 @@ def parse_args():
     # codigos fisicamente deslocados alem do raio do refine_tile_box, sem
     # roubar simbolo de celulas ja decodificadas.
     p.add_argument(
-        "--heatmap-fallback", dest="heatmap_fallback", action="store_true", default=True,
+        "--heatmap-fallback", dest="heatmap_fallback", action="store_true", default=False,
     )
     p.add_argument(
         "--no-heatmap-fallback", dest="heatmap_fallback", action="store_false",
@@ -725,7 +725,7 @@ def decode_grid(
     refine_cells=True,
     refine_max_shift=0,
     refine_fallback=True,
-    heatmap_fallback=True,
+    heatmap_fallback=False,
     heatmap_search_radius_factor=0.75,
     heatmap_min_score=70,
     heatmap_num_peaks=4,
