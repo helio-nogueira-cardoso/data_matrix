@@ -2,3 +2,7 @@
 venv/
 __pycache__/
 *.pyc
+
+# experimental outputs: keep CSV/JSON/TXT, ignore heavy PNG renders
+results/**/ortho.png
+results/**/annotated.png

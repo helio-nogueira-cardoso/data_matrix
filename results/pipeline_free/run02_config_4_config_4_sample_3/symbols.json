@@ -1,0 +1,1638 @@
+{
+  "count": 96,
+  "candidates_considered": 241,
+  "symbols": [
+    {
+      "text": "P",
+      "method": "otsu",
+      "box": [
+        5420,
+        1,
+        140,
+        140
+      ],
+      "center": [
+        5489.0,
+        71.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 87.36581420898438,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "T",
+      "method": "otsu",
+      "box": [
+        2959,
+        3,
+        140,
+        140
+      ],
+      "center": [
+        3028.0,
+        73.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 77.019775390625,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        1993,
+        4,
+        140,
+        140
+      ],
+      "center": [
+        2062.0,
+        74.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 77.37462615966797,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "J",
+      "method": "otsu",
+      "box": [
+        2315,
+        7,
+        140,
+        140
+      ],
+      "center": [
+        2384.0,
+        77.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 79.28851318359375,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        678,
+        7,
+        140,
+        140
+      ],
+      "center": [
+        747.0,
+        77.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 81.73844909667969,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "C",
+      "method": "otsu",
+      "box": [
+        2148,
+        8,
+        140,
+        140
+      ],
+      "center": [
+        2217.0,
+        78.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 77.06170654296875,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        1818,
+        8,
+        140,
+        140
+      ],
+      "center": [
+        1887.0,
+        78.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 77.14864349365234,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        2632,
+        9,
+        140,
+        140
+      ],
+      "center": [
+        2701.0,
+        79.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 75.229248046875,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "M",
+      "method": "otsu",
+      "box": [
+        4443,
+        10,
+        140,
+        140
+      ],
+      "center": [
+        4512.0,
+        80.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 78.20306396484375,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "J",
+      "method": "otsu",
+      "box": [
+        5246,
+        11,
+        140,
+        140
+      ],
+      "center": [
+        5315.0,
+        81.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 88.70486450195312,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        4931,
+        13,
+        140,
+        140
+      ],
+      "center": [
+        5000.0,
+        83.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 84.95565795898438,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        1659,
+        13,
+        140,
+        140
+      ],
+      "center": [
+        1728.0,
+        83.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 77.51827239990234,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "T",
+      "method": "otsu",
+      "box": [
+        4601,
+        14,
+        140,
+        140
+      ],
+      "center": [
+        4670.0,
+        84.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 80.72514343261719,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "M",
+      "method": "otsu",
+      "box": [
+        2801,
+        16,
+        140,
+        140
+      ],
+      "center": [
+        2870.0,
+        86.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 70.42217254638672,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "H",
+      "method": "otsu",
+      "box": [
+        179,
+        164,
+        140,
+        140
+      ],
+      "center": [
+        248.0,
+        234.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 84.3184585571289,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu_bil",
+      "box": [
+        25,
+        166,
+        140,
+        140
+      ],
+      "center": [
+        94.0,
+        236.0
+      ],
+      "n_votes": 3,
+      "proposal_score": 84.02731323242188,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5581,
+        171,
+        140,
+        140
+      ],
+      "center": [
+        5650.0,
+        241.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 90.77327728271484,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "J",
+      "method": "otsu",
+      "box": [
+        349,
+        171,
+        140,
+        140
+      ],
+      "center": [
+        418.0,
+        241.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 83.71866607666016,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        5908,
+        174,
+        140,
+        140
+      ],
+      "center": [
+        5977.0,
+        244.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 87.857177734375,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        5421,
+        175,
+        140,
+        140
+      ],
+      "center": [
+        5490.0,
+        245.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 89.35995483398438,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        685,
+        177,
+        140,
+        140
+      ],
+      "center": [
+        754.0,
+        247.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 79.93789672851562,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5746,
+        178,
+        140,
+        140
+      ],
+      "center": [
+        5815.0,
+        248.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 93.22390747070312,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "H",
+      "method": "otsu",
+      "box": [
+        26,
+        336,
+        140,
+        140
+      ],
+      "center": [
+        95.0,
+        406.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 83.9881591796875,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5908,
+        340,
+        140,
+        140
+      ],
+      "center": [
+        5977.0,
+        410.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 97.52839660644531,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "S",
+      "method": "otsu_bil",
+      "box": [
+        2322,
+        340,
+        140,
+        140
+      ],
+      "center": [
+        2391.0,
+        410.0
+      ],
+      "n_votes": 4,
+      "proposal_score": 56.27519226074219,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "H",
+      "method": "otsu",
+      "box": [
+        2468,
+        344,
+        140,
+        140
+      ],
+      "center": [
+        2537.0,
+        414.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 54.780757904052734,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "J",
+      "method": "otsu",
+      "box": [
+        23,
+        504,
+        140,
+        140
+      ],
+      "center": [
+        92.0,
+        574.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 82.63064575195312,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "F",
+      "method": "otsu",
+      "box": [
+        5906,
+        505,
+        140,
+        140
+      ],
+      "center": [
+        5975.0,
+        575.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 94.59968566894531,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "J",
+      "method": "otsu",
+      "box": [
+        5922,
+        647,
+        137,
+        140
+      ],
+      "center": [
+        5991.0,
+        717.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 95.49481201171875,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "V",
+      "method": "otsu",
+      "box": [
+        5585,
+        663,
+        140,
+        140
+      ],
+      "center": [
+        5654.0,
+        733.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 84.00729370117188,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "J",
+      "method": "otsu",
+      "box": [
+        5429,
+        676,
+        140,
+        140
+      ],
+      "center": [
+        5498.0,
+        746.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 85.37931060791016,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        23,
+        826,
+        140,
+        140
+      ],
+      "center": [
+        92.0,
+        896.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 84.51806640625,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        25,
+        986,
+        140,
+        140
+      ],
+      "center": [
+        94.0,
+        1056.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 85.03697967529297,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5908,
+        996,
+        140,
+        140
+      ],
+      "center": [
+        5977.0,
+        1066.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 94.12991333007812,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "C",
+      "method": "otsu",
+      "box": [
+        842,
+        1151,
+        140,
+        140
+      ],
+      "center": [
+        911.0,
+        1221.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 61.29367446899414,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        5908,
+        1163,
+        140,
+        140
+      ],
+      "center": [
+        5977.0,
+        1233.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 91.9875259399414,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "H",
+      "method": "otsu",
+      "box": [
+        840,
+        1324,
+        140,
+        140
+      ],
+      "center": [
+        909.0,
+        1394.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 62.60860061645508,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5904,
+        1329,
+        140,
+        140
+      ],
+      "center": [
+        5973.0,
+        1399.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 94.01730346679688,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "R",
+      "method": "otsu",
+      "box": [
+        5579,
+        1331,
+        140,
+        140
+      ],
+      "center": [
+        5648.0,
+        1401.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 82.50060272216797,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        20,
+        1969,
+        140,
+        140
+      ],
+      "center": [
+        89.0,
+        2039.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 82.83425903320312,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "O",
+      "method": "otsu",
+      "box": [
+        5411,
+        1985,
+        140,
+        140
+      ],
+      "center": [
+        5480.0,
+        2055.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 77.1631088256836,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "E",
+      "method": "otsu",
+      "box": [
+        5580,
+        1993,
+        140,
+        140
+      ],
+      "center": [
+        5649.0,
+        2063.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 80.13603210449219,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        21,
+        2144,
+        140,
+        140
+      ],
+      "center": [
+        90.0,
+        2214.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 80.00285339355469,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        35,
+        2304,
+        140,
+        140
+      ],
+      "center": [
+        104.0,
+        2374.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 79.02857971191406,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5904,
+        2314,
+        140,
+        140
+      ],
+      "center": [
+        5973.0,
+        2384.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 92.82815551757812,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        5910,
+        2475,
+        140,
+        140
+      ],
+      "center": [
+        5979.0,
+        2545.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 90.31892395019531,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5908,
+        2646,
+        140,
+        140
+      ],
+      "center": [
+        5977.0,
+        2716.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 94.5322265625,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "h",
+      "method": "otsu",
+      "box": [
+        5581,
+        2804,
+        140,
+        140
+      ],
+      "center": [
+        5650.0,
+        2874.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 93.60783386230469,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        23,
+        3450,
+        140,
+        140
+      ],
+      "center": [
+        92.0,
+        3520.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 78.20097351074219,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        19,
+        3609,
+        140,
+        140
+      ],
+      "center": [
+        88.0,
+        3679.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 83.36405944824219,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        20,
+        3780,
+        140,
+        140
+      ],
+      "center": [
+        89.0,
+        3850.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 82.03993225097656,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "S",
+      "method": "otsu",
+      "box": [
+        5424,
+        3783,
+        140,
+        140
+      ],
+      "center": [
+        5493.0,
+        3853.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 84.53533172607422,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "H",
+      "method": "otsu",
+      "box": [
+        5588,
+        3790,
+        140,
+        140
+      ],
+      "center": [
+        5657.0,
+        3860.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 83.94207763671875,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        22,
+        4275,
+        140,
+        140
+      ],
+      "center": [
+        91.0,
+        4345.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 86.22050476074219,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5912,
+        4284,
+        140,
+        140
+      ],
+      "center": [
+        5981.0,
+        4354.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 92.94120025634766,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        5892,
+        4444,
+        140,
+        140
+      ],
+      "center": [
+        5961.0,
+        4514.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 93.00787353515625,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        20,
+        4447,
+        140,
+        140
+      ],
+      "center": [
+        89.0,
+        4517.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 85.81096649169922,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        26,
+        4604,
+        140,
+        140
+      ],
+      "center": [
+        95.0,
+        4674.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 88.85596466064453,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5905,
+        4613,
+        140,
+        140
+      ],
+      "center": [
+        5974.0,
+        4683.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 90.65025329589844,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        21,
+        5095,
+        140,
+        140
+      ],
+      "center": [
+        90.0,
+        5165.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 89.75858306884766,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5896,
+        5099,
+        140,
+        140
+      ],
+      "center": [
+        5965.0,
+        5169.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 89.19699096679688,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        5751,
+        5109,
+        140,
+        140
+      ],
+      "center": [
+        5820.0,
+        5179.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 85.36892700195312,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "O",
+      "method": "otsu",
+      "box": [
+        4270,
+        5263,
+        140,
+        140
+      ],
+      "center": [
+        4339.0,
+        5333.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 71.43338775634766,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        15,
+        5263,
+        140,
+        140
+      ],
+      "center": [
+        84.0,
+        5333.0
+      ],
+      "n_votes": 4,
+      "proposal_score": 83.09779357910156,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "S",
+      "method": "otsu",
+      "box": [
+        5093,
+        5264,
+        140,
+        140
+      ],
+      "center": [
+        5162.0,
+        5334.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 85.99064636230469,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5742,
+        5266,
+        140,
+        140
+      ],
+      "center": [
+        5811.0,
+        5336.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 89.5111312866211,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "V",
+      "method": "otsu",
+      "box": [
+        5252,
+        5267,
+        140,
+        140
+      ],
+      "center": [
+        5321.0,
+        5337.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 84.28744506835938,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "E",
+      "method": "otsu",
+      "box": [
+        4109,
+        5271,
+        140,
+        140
+      ],
+      "center": [
+        4178.0,
+        5341.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 60.177207946777344,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "F",
+      "method": "otsu",
+      "box": [
+        2969,
+        5425,
+        140,
+        140
+      ],
+      "center": [
+        3038.0,
+        5495.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 69.92545318603516,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        14,
+        5430,
+        140,
+        140
+      ],
+      "center": [
+        83.0,
+        5500.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 86.17988586425781,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        13,
+        5596,
+        140,
+        140
+      ],
+      "center": [
+        82.0,
+        5666.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 85.59242248535156,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "H",
+      "method": "otsu",
+      "box": [
+        2968,
+        5597,
+        140,
+        140
+      ],
+      "center": [
+        3037.0,
+        5667.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 75.33694458007812,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        336,
+        5751,
+        140,
+        140
+      ],
+      "center": [
+        405.0,
+        5821.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 86.72401428222656,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu_bil",
+      "box": [
+        5735,
+        5756,
+        140,
+        140
+      ],
+      "center": [
+        5804.0,
+        5826.0
+      ],
+      "n_votes": 4,
+      "proposal_score": 87.00650024414062,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        179,
+        5758,
+        140,
+        140
+      ],
+      "center": [
+        248.0,
+        5828.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 87.03994750976562,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        29,
+        5758,
+        140,
+        140
+      ],
+      "center": [
+        98.0,
+        5828.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 80.80873107910156,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "A",
+      "method": "otsu_bil",
+      "box": [
+        503,
+        5761,
+        140,
+        140
+      ],
+      "center": [
+        572.0,
+        5831.0
+      ],
+      "n_votes": 3,
+      "proposal_score": 81.74829864501953,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        4275,
+        5906,
+        140,
+        140
+      ],
+      "center": [
+        4344.0,
+        5976.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 84.29230499267578,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        2161,
+        5907,
+        140,
+        140
+      ],
+      "center": [
+        2230.0,
+        5977.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 81.2153549194336,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        4111,
+        5908,
+        140,
+        140
+      ],
+      "center": [
+        4180.0,
+        5978.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 80.80903625488281,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5419,
+        5913,
+        140,
+        140
+      ],
+      "center": [
+        5488.0,
+        5983.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 86.87944030761719,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "E",
+      "method": "otsu",
+      "box": [
+        2961,
+        5913,
+        140,
+        140
+      ],
+      "center": [
+        3030.0,
+        5983.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 82.28245544433594,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "J",
+      "method": "otsu",
+      "box": [
+        4753,
+        5914,
+        140,
+        140
+      ],
+      "center": [
+        4822.0,
+        5984.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 82.94589233398438,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        3456,
+        5914,
+        140,
+        140
+      ],
+      "center": [
+        3525.0,
+        5984.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 83.86923217773438,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "E",
+      "method": "otsu",
+      "box": [
+        4601,
+        5915,
+        140,
+        140
+      ],
+      "center": [
+        4670.0,
+        5985.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 79.08454132080078,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        2312,
+        5916,
+        140,
+        140
+      ],
+      "center": [
+        2381.0,
+        5986.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 82.38992309570312,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        5246,
+        5917,
+        140,
+        140
+      ],
+      "center": [
+        5315.0,
+        5987.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 81.81932067871094,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        3295,
+        5917,
+        140,
+        140
+      ],
+      "center": [
+        3364.0,
+        5987.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 83.32208251953125,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "J",
+      "method": "otsu",
+      "box": [
+        2805,
+        5917,
+        140,
+        140
+      ],
+      "center": [
+        2874.0,
+        5987.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 83.06700897216797,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5579,
+        5918,
+        140,
+        140
+      ],
+      "center": [
+        5648.0,
+        5988.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 88.03482055664062,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "T",
+      "method": "otsu",
+      "box": [
+        3789,
+        5918,
+        140,
+        140
+      ],
+      "center": [
+        3858.0,
+        5988.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 78.54686737060547,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "G",
+      "method": "otsu",
+      "box": [
+        3956,
+        5920,
+        140,
+        140
+      ],
+      "center": [
+        4025.0,
+        5990.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 81.01274108886719,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        2480,
+        5920,
+        140,
+        140
+      ],
+      "center": [
+        2549.0,
+        5990.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 83.92807006835938,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        516,
+        5927,
+        140,
+        140
+      ],
+      "center": [
+        585.0,
+        5997.0
+      ],
+      "n_votes": 3,
+      "proposal_score": 81.5876693725586,
+      "proposal_source": "heat_103"
+    },
+    {
+      "text": "B",
+      "method": "otsu",
+      "box": [
+        5091,
+        5928,
+        140,
+        140
+      ],
+      "center": [
+        5160.0,
+        5998.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 85.39175415039062,
+      "proposal_source": "heat_80"
+    },
+    {
+      "text": "A",
+      "method": "otsu",
+      "box": [
+        5751,
+        5931,
+        140,
+        140
+      ],
+      "center": [
+        5820.0,
+        6001.0
+      ],
+      "n_votes": 2,
+      "proposal_score": 79.99542236328125,
+      "proposal_source": "heat_80"
+    }
+  ]
+}
