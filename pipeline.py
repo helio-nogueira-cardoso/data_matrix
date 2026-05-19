@@ -654,8 +654,23 @@ def build_ortho(image_bgr, template_bgr, margin=None):
     # Se margin=None (padrão), a margem é calculada automaticamente como
     # ceil(metade do menor passo da grade). Como as cruzes de canto estão
     # centralizadas nos furos dos cantos da grade igualmente espaçada, essa
-    # margem garante que todas as células — inclusive as de canto — tenham
+    # margem garante que todas as células, inclusive as de canto, tenham
     # recorte de tamanho nominal sem truncamento pela borda da imagem.
+    #
+    # Estratégia de seleção dos 4 picos: matchTemplate sozinho falha quando
+    # uma das cruzes está em peg translúcido, ou em região de baixo contraste,
+    # ou existe um padrão local que pontua mais alto que a cruz real (caso
+    # típico: constelação de 4 perfurações brilhantes do painel forma um
+    # padrão que correlaciona melhor com o template do que uma cruz física
+    # com peg translúcido). Para resolver isto sem inferência geométrica,
+    # cada candidato do top-K bruto é validado pela FORMA do componente
+    # conexo escuro no centro: cruz real tem (i) aspect razão ≈ 1
+    # (bounding box quadrado), (ii) extent (área/bbox) ≈ 0.4 (cruz fina
+    # deixando ~60% do bbox vazio) e (iii) solidity (área/convex hull) < 0.7
+    # (braços abertos vs blob sólido). Estes três descritores juntos
+    # discriminam cruzes físicas das principais classes de falso positivo:
+    # constelações de perfurações (extent alto, solidity alto), juntas de
+    # madeira do quadro (aspect distante de 1) e padrões lineares.
 
     import math
 
@@ -663,9 +678,77 @@ def build_ortho(image_bgr, template_bgr, margin=None):
     gray_template = cv2.cvtColor(template_bgr, cv2.COLOR_BGR2GRAY)
     th, tw = gray_template.shape[:2]
 
-    # Procura o template na imagem.
+    nms_radius = max(1, int(min(tw, th) * 0.6))
+
+    def is_cross_shape(window):
+        # Verifica se a janela contém uma cruz via análise de componentes conexos.
+        # Devolve True se aspecto, extent e solidity baterem com a assinatura
+        # geométrica de uma cruz física.
+        if window.shape != (th, tw):
+            return False
+        _, bin_img = cv2.threshold(window, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(bin_img, connectivity=8)
+        if n <= 1:
+            return False
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        if len(areas) == 0:
+            return False
+        idx = 1 + int(np.argmax(areas))
+        area = int(stats[idx, cv2.CC_STAT_AREA])
+        w_blob = int(stats[idx, cv2.CC_STAT_WIDTH])
+        h_blob = int(stats[idx, cv2.CC_STAT_HEIGHT])
+        if area < 500 or w_blob <= 0 or h_blob <= 0:
+            return False
+        aspect = w_blob / float(h_blob)
+        extent = area / float(w_blob * h_blob)
+        if not (0.85 <= aspect <= 1.15):
+            return False
+        if not (0.35 <= extent <= 0.46):
+            return False
+        # Solidity (área / convex hull) discrimina cruz (braços abertos,
+        # solidity ~ 0.6) de blob sólido (solidity > 0.7). Computado a partir
+        # do contorno externo do componente.
+        mask = (labels == idx).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return False
+        hull_area = cv2.contourArea(cv2.convexHull(contours[0]))
+        if hull_area <= 0:
+            return False
+        solidity = area / hull_area
+        return solidity < 0.7
+
+    # matchTemplate global e busca por candidatos com supressão local.
+    # Em vez de pegar diretamente o top-4, varremos os candidatos do mais
+    # forte ao mais fraco e selecionamos os 4 primeiros que passam pela
+    # verificação de forma. Limite superior em 100 candidatos para conter
+    # o custo em imagens patológicas (cruz não existe na imagem).
     response = cv2.matchTemplate(gray_image, gray_template, cv2.TM_CCOEFF_NORMED)
-    matches = find_four_matches(response, radius=min(tw, th) * 0.6)
+    work = response.copy()
+    accepted_matches = []
+    fallback_matches = []  # top-4 cru, usado se a verificação rejeitar muitos
+    max_candidates = 100
+    for _ in range(max_candidates):
+        _, max_v, _, loc = cv2.minMaxLoc(work)
+        if max_v <= -1.0:
+            break
+        x, y = int(loc[0]), int(loc[1])
+        if len(fallback_matches) < 4:
+            fallback_matches.append([x, y])
+        window = gray_image[y:y + th, x:x + tw]
+        if is_cross_shape(window):
+            accepted_matches.append([x, y])
+            if len(accepted_matches) >= 4:
+                break
+        x0, y0 = max(0, x - nms_radius), max(0, y - nms_radius)
+        x1, y1 = min(work.shape[1] - 1, x + nms_radius), min(work.shape[0] - 1, y + nms_radius)
+        work[y0:y1 + 1, x0:x1 + 1] = -1.0
+
+    # Se a verificação de forma rejeitou candidatos a ponto de não obter 4
+    # cruzes válidas, cai para o top-4 cru. Sinal claro de imagem fora do
+    # regime treinado (cruzes ausentes, mal enquadradas, ou desfocadas).
+    matches_list = accepted_matches if len(accepted_matches) >= 4 else fallback_matches
+    matches = np.array(matches_list[:4], dtype=np.float32)
 
     # Converte top-left dos matches em centros do template.
     centers = matches + np.array([tw / 2.0, th / 2.0], np.float32)

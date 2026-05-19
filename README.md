@@ -44,22 +44,45 @@ Subprojeto Python do AppArq original (C++/Qt), mantido dentro deste diretório e
 
 As imagens de entrada são capturadas a partir da face inferior da maquete, onde os códigos DataMatrix estão visíveis.
 
-Testes foram realizados utilizando câmera de dispositivo móvel (por exemplo, Samsung Galaxy S23 Ultra), com captura em alta resolução (50 MP, formato RAW convertido para PNG).
+Testes foram realizados utilizando câmera de dispositivo móvel (por exemplo, Samsung Galaxy S23 Ultra), com captura em alta resolução (12 a 50 megapixels) e em formatos JPEG ou RAW convertido para PNG.
 
 Requisitos recomendados:
 
 * resolução mínima de aproximadamente 8160 × 6120 pixels
 * boa iluminação e contraste
 * foco adequado nos códigos
-* baixa distorção geométrica (ou corrigível via ortorretificação)
+* baixa distorção geométrica (corrigível via ortorretificação)
+* pinos firmemente encaixados na base, com o código exposto e em plano paralelo ao sensor
 
 A qualidade da imagem impacta diretamente a taxa de detecção e decodificação.
+
+## Configurações de câmera por regime de iluminação
+
+O conjunto experimental foi construído com três configurações distintas do
+aplicativo nativo da câmera do Samsung Galaxy S23 Ultra, adaptadas a três
+condições ambientais:
+
+| Parâmetro | Interno diurno | Retroiluminado | Pouco iluminado |
+|-----------|----------------|----------------|-----------------|
+| Resolução | 12 MP | 12 MP | 50 MP |
+| Formato | JPEG | JPEG | RAW |
+| Lente | W (grande angular) | W (grande angular) | W (grande angular) |
+| Abertura | f/1,7 | f/1,7 | f/1,7 |
+| ISO | Automático | Automático | 12 |
+| Velocidade | 1/8 s | 2 s | 8 s |
+| Compensação (EV) | 0,0 | −0,6 | −0,5 |
+| Foco | Múltiplo | Centro | AF-M (múltiplo) |
+| Balanço de branco | Automático | Automático | 4400 K |
+
+A configuração para ambiente pouco iluminado pressupõe que o dispositivo
+esteja apoiado em superfície estável ou tripé, dada a exposição prolongada
+de 8 segundos.
 
 ---
 
 # Papel dos Códigos DataMatrix
 
-Os códigos DataMatrix ECC200 funcionam como identificadores primitivos. Cada elemento arquitetônico é descrito por um conjunto de códigos, e não por um único marcador.
+Os códigos DataMatrix ECC200 funcionam como identificadores primitivos. Cada elemento arquitetônico é descrito por um conjunto de códigos, em vez de um único marcador.
 
 A interpretação desses conjuntos (tipo, orientação e relações espaciais) é realizada pelo módulo `PyAppArq/objects_handler.py`, com base nas definições em `PyAppArq/objetos.json`.
 
@@ -98,9 +121,9 @@ A allowlist de letras válidas vive em `symbols_config.json` (artefato de
 produção, somente leitura em runtime). Os três pipelines carregam esse
 arquivo no carregamento do módulo e o passam para `looks_like_valid_symbol`,
 que rejeita qualquer leitura fora do vocabulário. Isso filtra corrupções
-típicas do `libdmtx` em tiles limítrofes — ele às vezes devolve letras
-cosméticas como `'N'`, `'I'` ou strings com caracteres de controle (`'H63E'`,
-`'P07\\x05'`) que escapariam de uma checagem só por `isalpha()`.
+típicas do `libdmtx` em tiles limítrofes (ele às vezes devolve letras
+cosméticas como `'N'`, `'I'` ou strings com caracteres de controle como
+`'H63E'` ou `'P07\\x05'`) que escapariam de uma checagem só por `isalpha()`.
 
 ```json
 {
@@ -114,7 +137,7 @@ cosméticas como `'N'`, `'I'` ou strings com caracteres de controle (`'H63E'`,
 }
 ```
 
-Editar o arquivo é a única forma de mudar o conjunto de símbolos aceitos —
+Editar o arquivo é a única forma de mudar o conjunto de símbolos aceitos;
 não há flag de linha de comando para isso, deliberadamente: o vocabulário
 descreve o projeto, não a execução.
 
@@ -124,7 +147,7 @@ Cada imagem é decodificada na orientação em que foi capturada. Os pipelines
 **não** rotacionam tile, ortho ou imagem como fallback para "fishar" leituras
 do `libdmtx`. Apesar de o ECC200 ser nominalmente invariante a rotação, o
 `libdmtx` ocasionalmente devolve resultados diferentes para versões
-rotacionadas de um mesmo tile binarizado em casos limítrofes — explorar isso
+rotacionadas de um mesmo tile binarizado em casos limítrofes; explorar isso
 seria assumir que a foto pode ter "qualquer" orientação e, na prática,
 geraria leituras potencialmente erradas em produção, onde não há gabarito
 para validar. As recuperações vêm exclusivamente de variações *legítimas*:
@@ -134,10 +157,10 @@ para validar. As recuperações vêm exclusivamente de variações *legítimas*:
   candidatos, em vez de cascade-com-early-exit. Cobre o caso de o `otsu` ler
   uma letra errada mas válida (no allowlist) em tiles onde CLAHE+sharpen
   flipa bits dentro do símbolo.
-* **Multi-crop** — crops centrais com lados menores (75 %, 65 %, 55 %)
+* **Multi-crop**: crops centrais com lados menores (75 %, 65 %, 55 %)
   como recurso quando todos os pré-processamentos falham num tile que
   ainda parece ter conteúdo real.
-* **Allowlist** — rejeição de leituras fora do vocabulário do projeto.
+* **Allowlist**: rejeição de leituras fora do vocabulário do projeto.
 
 ---
 
@@ -151,6 +174,21 @@ Arquivo: `pipeline.py`
 
 * Divide a imagem em uma grade fixa 37×37 cuja geometria espelha o
   espaçamento regular da base perfurada.
+* A ortorretificação localiza os quatro marcadores de canto em cruz por
+  correlação cruzada normalizada do template (`cv2.matchTemplate` com
+  `TM_CCOEFF_NORMED`), seguida de **verificação de forma** sobre cada
+  candidato: o pico do mapa de resposta é aceito apenas se a componente
+  conexa escura no recorte tem razão de aspecto entre 0,85 e 1,15,
+  extensão (área da componente sobre área da caixa envolvente) entre
+  0,35 e 0,46 e solidez (área sobre fecho convexo) abaixo de 0,70. Esses
+  três descritores em conjunto formam a assinatura geométrica de uma
+  cruz física e descartam falsos positivos típicos: constelações de
+  quatro perfurações brilhantes da grade do painel (extensão e solidez
+  altas), juntas perpendiculares da moldura de madeira (caixa
+  envolvente alongada) e padrões lineares (razão de aspecto extrema).
+  Sem essa verificação, imagens com um marcador em pino translúcido ou
+  em região sombreada pela moldura ficam com a quarta cruz física
+  rankeada abaixo de padrões espúrios com pontuação mais alta.
 * Cada célula passa por 5 pré-processamentos
   (`otsu`, `otsu_bil`, `adaptive`, `sharp`, `gray`) com **voto majoritário**.
   Caminho rápido: se `otsu` e `otsu_bil` concordam numa leitura válida pelo
@@ -159,34 +197,58 @@ Arquivo: `pipeline.py`
   tiebreaker em empate). Isso evita que o `otsu` curto-circuite o cascade
   com leitura errada-mas-válida em tiles onde CLAHE+sharpen flipa bits
   dentro do símbolo (overshoot nas bordas dos módulos).
+* O voto majoritário rastreia também leituras rejeitadas pelo allowlist
+  (filtro **anti-fantasma**, ativo por padrão). Quando o vencedor da
+  votação tem apenas um voto válido contra duas ou mais leituras
+  rejeitadas pelo vocabulário (tipicamente o sentinela `X` ou strings
+  com dígitos do tipo `'H63E'`), a célula é considerada ambígua e
+  recebe a marca de vazio. Isso elimina leituras-fantasma em padrões
+  cosméticos do `libdmtx` onde uma variante isolada vaza para uma
+  letra do vocabulário enquanto as demais convergem em rejeitadas.
+* O filtro `skip_empty` (descarte heurístico de tiles sem conteúdo,
+  baseado em desvio-padrão e proporção de pixels escuros) é **opcional**
+  (`--skip-empty`), desligado por padrão. Pegs físicos de baixíssimo
+  contraste (DataMatrix em material transparente) podem ficar abaixo
+  dos limiares de descarte e ainda assim decodificar corretamente
+  quando submetidos à cascata de pré-processamentos; nesses casos a
+  perda de recall supera o ganho de tempo. A `pylibdmtx` já retorna
+  rapidamente em regiões verdadeiramente vazias, então a economia
+  agregada com o filtro habilitado fica em torno de 10 % do tempo total.
 * A margem do ortho é calculada automaticamente como `ceil(passo/2)` do
   menor lado da grade. Como os marcadores de canto ficam centralizados
-  nos furos extremos, isso garante que toda célula — inclusive as de
-  borda — tenha recorte do tamanho nominal com o símbolo centralizado.
+  nos furos extremos, isso garante que toda célula, inclusive as de
+  borda, tenha recorte do tamanho nominal com o símbolo centralizado.
   Não há mais necessidade de votação de borda ou padding auxiliar para
   resolver clamping na margem.
-* O realinhamento da caixa — transladá-la para centralizar o componente
-  conexo escuro mais próximo do centro nominal — entra como **fallback**,
-  não passo obrigatório. Primeira passada decodifica todas as 1369 células
-  na caixa nominal; segunda passada, controlada por `--refine-fallback`
-  (default ligado), aplica o realinhamento apenas nas células que ficaram
-  `_`. Isso casa dois regimes que se prejudicavam mutuamente quando
-  aplicados a todas as células: a caixa nominal funciona melhor em tiles
-  bem centralizados (alguns `h` e `V` pioram porque o realinhamento puxa
-  a caixa para um furo da base que vira ponto parasita), e o realinhamento
-  recupera símbolos fisicamente deslocados que escapam do recorte nominal.
-  A condição de movimento da caixa (área do componente entre 5 % e 110 %
-  da do box, distância ≤ 30 % do passo, `std` da região ≥ 8) e o
-  `tile_looks_empty` interno garantem que tiles realmente vazios não
-  paguem custo nem produzam falsos positivos no fallback. Para o regime
-  antigo (refine em todas as células antes do decode) basta passar
-  `--refine-cells`; para desligar o fallback, `--no-refine-fallback`.
+* O realinhamento da caixa (transladá-la para centralizar o componente
+  conexo escuro mais próximo do centro nominal) entra como **fallback**,
+  não como passo obrigatório. Primeira passada decodifica todas as 1369
+  células na caixa nominal; segunda passada, controlada por
+  `--refine-fallback` (default ligado), aplica o realinhamento apenas
+  nas células que ficaram `_`. Isso casa dois regimes que se prejudicavam
+  mutuamente quando aplicados a todas as células: a caixa nominal
+  funciona melhor em tiles bem centralizados (alguns `h` e `V` pioram
+  porque o realinhamento puxa a caixa para um furo da base que vira
+  ponto parasita), e o realinhamento recupera símbolos fisicamente
+  deslocados que escapam do recorte nominal. A condição de movimento
+  da caixa (área do componente entre 5 % e 110 % da do box, distância
+  ≤ 30 % do passo, `std` da região ≥ 8) e o `tile_looks_empty` interno
+  garantem que tiles realmente vazios não paguem custo nem produzam
+  falsos positivos no fallback. Para o regime antigo (refine em todas as
+  células antes do decode) basta passar `--refine-cells`; para desligar
+  o fallback, `--no-refine-fallback`.
 * Quando todos os pré-processamentos canônicos falham e o tile parece ter
   conteúdo real (`std ≥ 18`), a decodificação tenta crops centrais a 75 %,
   65 % e 55 % do lado da célula. Esse multi-crop é complementar ao
-  realinhamento descrito acima: enquanto aquele trata de marcador
-  fisicamente deslocado, o multi-crop trata de zona silenciosa
+  realinhamento descrito acima: o realinhamento trata de marcador
+  fisicamente deslocado, e o multi-crop trata de zona silenciosa
   contaminada por ruído ou por símbolo vizinho.
+* Para imagens com cruzes em condições adversas que escapam da
+  verificação de forma e do filtro anti-fantasma, há ainda o
+  `--heatmap-fallback` (opt-in): aplica a lógica de proposição global
+  do `pipeline_free.py` (heatmap local de contraste + componentes
+  conexos) às células remanescentes que pareçam ter conteúdo, como
+  rede de segurança para imagens fora do regime padrão.
 
 ### Uso
 
@@ -201,11 +263,11 @@ python pipeline.py \
 ### Saída
 
 * `grid.txt` → matriz 37×37 com os símbolos detectados (`_` em cada célula
-  vazia), em **frame de topo** — colunas espelhadas em relação à foto, de
+  vazia), em **frame de topo**: colunas espelhadas em relação à foto, de
   modo que o arquivo bate com a vista superior real da maquete e com o
   JSON do PyAppArq. Os modos de debug (`--test-cell`, `--dump-elements`)
   continuam usando coordenadas em frame de foto, porque operam diretamente
-  sobre o ortho — para localizar uma célula vista no `grid.txt` em modo
+  sobre o ortho; para localizar uma célula vista no `grid.txt` em modo
   debug, use `(linha, COLS-1-coluna)`.
 
 ### Debug
@@ -237,13 +299,13 @@ Arquivo: `pipeline_free.py`
    80 px) para dar quiet zone aos símbolos colados nas bordas.
 3. Proposição de candidatos por três fontes complementares:
    * heatmap local (variância + black-hat morfológico) em múltiplas
-     escalas — `--proposal-scales` default `"0.90"` adiciona uma escala
+     escalas: `--proposal-scales` default `"0.90"` adiciona uma escala
      extra além da base `0.70`, recuperando tiles em paredes densas
      onde a NMS interna do heatmap suprimia peaks vizinhos.
    * componentes conectados sobre múltiplos mapas binários, com
      `--max-candidates-per-family` 200 (equilibra cobertura e custo).
    * **grade nominal 37×37** (`propose_from_grid`) como rede de
-     segurança — adiciona uma caixa em cada célula da grade idealizada.
+     segurança: adiciona uma caixa em cada célula da grade idealizada.
      Resolve dois tipos de falha que sobravam só com heatmap/components:
      (a) misreads onde o heatmap propõe caixa off-center que decodifica
      para letra cosmética válida pelo allowlist (o caso histórico
@@ -254,7 +316,7 @@ Arquivo: `pipeline_free.py`
      origem e o mecanismo de grade nominal segue resolvendo casos
      análogos com outras letras), (b) FN em regiões densas onde
      a NMS interna descarta candidatos.
-4. NMS global por IoU + distância entre centros — aplicada às fontes
+4. NMS global por IoU + distância entre centros, aplicada às fontes
    heatmap/components; a grade nominal vai direto para o decode, e a
    arbitragem entre fontes ocorre no dedup posterior por votos.
 5. Decodificação com voto majoritário entre os 5 pré-processamentos
@@ -264,7 +326,7 @@ Arquivo: `pipeline_free.py`
    tiebreaker. O número de votos é exposto em `n_votes` no JSON.
 6. Multi-crop (pad apertado) como fallback legítimo para tiles cujo
    crop nominal não fechou e que ainda parecem ter conteúdo.
-7. Fase 3 multi-crop central (75/65/55 % do lado do tile) — espelha o
+7. Fase 3 multi-crop central (75/65/55 % do lado do tile): espelha o
    multi-crop do `pipeline.py` grid e recupera símbolos pequenos
    relativos à célula (caso `(3,26)='H'` em `config_1_sample_2`, onde
    o símbolo ocupa ~30 % do tile e os pré-processamentos canônicos
@@ -327,12 +389,15 @@ Reescrita em Python da aplicação original AppArq (C++/Qt), com as seguintes mu
 * **Saída**: mesmo formato JSON para integração com o Revit
 
 O `pipeline.py` interno usa a mesma estratégia híbrida do `pipeline.py`
-raiz: voto majoritário entre 5 pré-processamentos, `refine_cells=False`
-como default, `refine_fallback=True` rodando uma segunda passada com
-realinhamento apenas nas células que ficaram `_` na primeira. A
-configuração antiga (`refine_cells=True` em todas as células) degradava
-imagens onde tiles bem centralizados (`h`/`V`) tinham componentes
-parasitas (furo da base) competindo com o símbolo real.
+raiz: ortorretificação por correlação cruzada normalizada com verificação
+de forma sobre os candidatos a cruz (mesmos descritores de razão de
+aspecto, extensão e solidez), voto majoritário entre 5 pré-processamentos,
+filtro anti-fantasma sobre rejeições do vocabulário, `skip_empty=False`
+por padrão, `refine_cells=False` como default e `refine_fallback=True`
+rodando uma segunda passada com realinhamento apenas nas células que
+ficaram `_` na primeira. A configuração antiga (`refine_cells=True` em
+todas as células) degradava imagens onde tiles bem centralizados (`h`/`V`)
+tinham componentes parasitas (furo da base) competindo com o símbolo real.
 
 ### Estrutura
 
@@ -375,7 +440,7 @@ A foto é capturada da face inferior da maquete, então o eixo horizontal
 sai espelhado em relação à vista de topo real. Antes da análise semântica,
 o grid é espelhado horizontalmente (`grid = [row[::-1] for row in grid]`),
 de modo que `maquete_objetos.json` e `maquete_grade.txt` saem em **frame
-de topo** — compatível com o que o plugin do Revit espera e alinhado com
+de topo**, compatível com o que o plugin do Revit espera e alinhado com
 os outros pipelines do projeto. Apenas a `maquete_imagem.png` continua em
 frame de foto, casando com a renderização do canvas da GUI (que mostra a
 imagem como capturada). Para correlacionar célula da GUI com posição
@@ -402,14 +467,15 @@ python tests/validate_baseline.py --pipeline all       # todos os três
 O script imprime uma linha por imagem com `count`, `missing`, `extra` e
 `[OK]/[FAIL]`, e devolve exit code `0` se tudo bater. O `expected_baseline.json`
 do lote atual cobre 8 imagens (4 fotos + 4 ortos rotacionados em 90°/180°/270°)
-e exige 42 letras por imagem. Para um lote novo, basta criar outro
+e exige 40 letras por imagem (após a remoção do sentinela `X` do vocabulário
+de saída do decodificador). Para um lote novo, basta criar outro
 `expected_*.json` ao lado e passar com `--baseline`.
 
 ---
 
 # Instalação
 
-Todo o projeto — pipelines da raiz **e** PyAppArq — usa uma única venv e um único `requirements.txt`, ambos na raiz do diretório.
+Todo o projeto (pipelines da raiz **e** PyAppArq) usa uma única venv e um único `requirements.txt`, ambos na raiz do diretório.
 
 ## 1. Dependências de sistema (Debian/Ubuntu/Mint)
 
@@ -437,7 +503,7 @@ ou `libdmtx0a` (versões mais antigas).
 Significado dos pacotes:
 
 * `libdmtx0t64` (ou `libdmtx0a`/`libdmtx0b`) e `libdmtx-dev`: biblioteca nativa
-  usada pelo `pylibdmtx`. **Os dois** são necessários — o runtime para
+  usada pelo `pylibdmtx`. **Os dois** são necessários: o runtime para
   carregar a `.so` em tempo de execução e o `-dev` para o pip conseguir
   fazer linkagem ao instalar o `pylibdmtx`.
 * `python3-gi` / `python3-gi-cairo` / `gir1.2-gtk-3.0`: GTK3 e PyGObject
@@ -471,7 +537,7 @@ setuptools
 
 # Problemas comuns
 
-## libdmtx — `Unable to locate package libdmtx0t64`
+## libdmtx: `Unable to locate package libdmtx0t64`
 
 Mensagem típica em Linux Mint 21 ou Ubuntu 22.04 (ambos baseados em
 Ubuntu Jammy). O nome do pacote runtime nessas versões é `libdmtx0b`,
@@ -487,9 +553,9 @@ E instale o que for listado, junto com `libdmtx-dev`:
 sudo apt install <nome-do-runtime> libdmtx-dev
 ```
 
-## libdmtx — `pylibdmtx` instala mas trava na primeira chamada
+## libdmtx: `pylibdmtx` instala mas trava na primeira chamada
 
-Significa que o runtime (`libdmtx0t64`/`0b`/`0a`) está faltando — só
+Significa que o runtime (`libdmtx0t64`/`0b`/`0a`) está faltando; só
 `libdmtx-dev` foi instalado. O `dev` traz só os headers, não a `.so`
 carregada em runtime. Reinstale o runtime:
 

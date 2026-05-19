@@ -177,8 +177,20 @@ def build_ortho(image_bgr, template_bgr, margin=None):
 
     Se margin=None (padrao), a margem e calculada automaticamente como
     ceil(metade do menor passo da grade 37x37). Isso garante que todas as
-    celulas — inclusive as de canto — tenham recorte de tamanho nominal
-    sem truncamento pela borda da imagem.
+    celulas, inclusive as de canto, tenham recorte de tamanho nominal sem
+    truncamento pela borda da imagem.
+
+    Estrategia de selecao dos 4 picos: matchTemplate sozinho falha quando
+    uma das cruzes esta em peg translucido, ou em regiao de baixo contraste,
+    ou existe um padrao local que pontua mais alto que a cruz real (caso
+    tipico: constelacao de 4 perfuracoes brilhantes do painel forma um
+    padrao que correlaciona melhor com o template do que uma cruz fisica
+    com peg translucido). Para resolver isto sem inferencia geometrica,
+    cada candidato do top-K bruto e validado pela FORMA do componente
+    conexo escuro no centro: cruz real tem aspect razao ~ 1, extent ~ 0.4
+    e solidity < 0.7. Estes tres descritores juntos discriminam cruzes
+    fisicas das principais classes de falso positivo (constelacoes de
+    perfuracoes, juntas de madeira e padroes lineares).
 
     Levanta OrthoError se os cantos nao podem ser encontrados ou sao invalidos.
     """
@@ -187,9 +199,71 @@ def build_ortho(image_bgr, template_bgr, margin=None):
     gray_image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     gray_template = cv2.cvtColor(template_bgr, cv2.COLOR_BGR2GRAY)
     th, tw = gray_template.shape[:2]
+    nms_radius = max(1, int(min(tw, th) * 0.6))
+
+    def is_cross_shape(window):
+        if window.shape != (th, tw):
+            return False
+        _, bin_img = cv2.threshold(window, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(bin_img, connectivity=8)
+        if n <= 1:
+            return False
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        if len(areas) == 0:
+            return False
+        idx = 1 + int(np.argmax(areas))
+        area = int(stats[idx, cv2.CC_STAT_AREA])
+        w_blob = int(stats[idx, cv2.CC_STAT_WIDTH])
+        h_blob = int(stats[idx, cv2.CC_STAT_HEIGHT])
+        if area < 500 or w_blob <= 0 or h_blob <= 0:
+            return False
+        aspect = w_blob / float(h_blob)
+        extent = area / float(w_blob * h_blob)
+        if not (0.85 <= aspect <= 1.15):
+            return False
+        if not (0.35 <= extent <= 0.46):
+            return False
+        mask = (labels == idx).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return False
+        hull_area = cv2.contourArea(cv2.convexHull(contours[0]))
+        if hull_area <= 0:
+            return False
+        solidity = area / hull_area
+        return solidity < 0.7
 
     response = cv2.matchTemplate(gray_image, gray_template, cv2.TM_CCOEFF_NORMED)
-    matches, scores = find_four_matches(response, radius=min(tw, th) * 0.6)
+    work = response.copy()
+    accepted_matches = []
+    fallback_matches = []
+    max_candidates = 100
+    for _ in range(max_candidates):
+        _, max_v, _, loc = cv2.minMaxLoc(work)
+        if max_v <= -1.0:
+            break
+        x, y = int(loc[0]), int(loc[1])
+        if len(fallback_matches) < 4:
+            fallback_matches.append([x, y])
+        window = gray_image[y:y + th, x:x + tw]
+        if is_cross_shape(window):
+            accepted_matches.append([x, y])
+            if len(accepted_matches) >= 4:
+                break
+        x0, y0 = max(0, x - nms_radius), max(0, y - nms_radius)
+        x1, y1 = min(work.shape[1] - 1, x + nms_radius), min(work.shape[0] - 1, y + nms_radius)
+        work[y0:y1 + 1, x0:x1 + 1] = -1.0
+
+    if len(accepted_matches) >= 4:
+        matches = np.array(accepted_matches[:4], dtype=np.float32)
+    elif len(fallback_matches) >= 4:
+        matches = np.array(fallback_matches[:4], dtype=np.float32)
+    else:
+        raise OrthoError(
+            f"Apenas {len(fallback_matches)} candidatos de cruz foram encontrados na imagem. "
+            f"Verifique se os 4 marcadores em cruz estao visiveis."
+        )
+
     centers = matches + np.array([tw / 2.0, th / 2.0], np.float32)
     corners = order_corners(centers)
 
