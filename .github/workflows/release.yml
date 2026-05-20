@@ -87,6 +87,12 @@ jobs:
           cd /tmp
           git clone --depth 1 https://github.com/dmtx/libdmtx.git
           cd libdmtx
+          # MinGW exige -no-undefined para criar shared library (DLL). A
+          # libdmtx upstream nao declara, entao injetamos antes do autoreconf.
+          if ! grep -q "no-undefined" Makefile.am; then
+            sed -i 's/^libdmtx_la_LDFLAGS\s*=.*/& -no-undefined/' Makefile.am
+            grep "libdmtx_la_LDFLAGS" Makefile.am || true
+          fi
           autoreconf -fiv
           ./configure --prefix=/mingw64 --disable-static --enable-shared
           make -j$(nproc)
