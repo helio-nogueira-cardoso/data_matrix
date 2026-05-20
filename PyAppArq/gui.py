@@ -269,8 +269,8 @@ class CorrectionWindow:
         self.disp_w = int(img_w * self.scale)
         self.disp_h = int(img_h * self.scale)
 
-        # Prepara pixbuf escalado.
-        self._prepare_pixbuf()
+        # Prepara superficie Cairo escalada.
+        self._prepare_surface()
 
         # Constroi a janela.
         self.window = Gtk.Window(title="Verificacao de Simbolos")
@@ -283,29 +283,35 @@ class CorrectionWindow:
 
         self._build_ui()
 
-    def _prepare_pixbuf(self):
-        """Converte a ortho BGR para GdkPixbuf na escala de exibicao.
+    def _prepare_surface(self):
+        """Converte a ortho BGR para cairo.ImageSurface na escala de exibicao.
 
-        GdkPixbuf.new_from_data NAO copia os bytes; mantem ponteiro para
-        o buffer externo. Se o bytes for coletado pelo GC antes do pixbuf
-        ser desenhado, o DrawingArea renderiza vazio. Mantemos referencias
-        explicitas a rgb (numpy array contiguo) e ao bytes em self._.
+        Usa cairo.ImageSurface direto (formato RGB24) em vez de
+        GdkPixbuf + Gdk.cairo_set_source_pixbuf. A ponte GdkPixbuf-Cairo
+        renderizava vazio dentro do binario PyInstaller. ImageSurface
+        contorna essa ponte e tambem evita problemas de ciclo de vida
+        do buffer (ImageSurface.create_for_data mantem ref ao bytes
+        enquanto a surface existe, mas guardamos refs por garantia).
+
+        Formato RGB24 do Cairo: 4 bytes por pixel, [B, G, R, X] em
+        little-endian, com stride alinhado em 4 bytes.
         """
-        self._rgb_array = np.ascontiguousarray(
-            cv2.cvtColor(self.ortho_bgr, cv2.COLOR_BGR2RGB)
+        import cairo
+        # Redimensiona em BGR mantendo precisao 8-bit.
+        small_bgr = cv2.resize(
+            self.ortho_bgr, (self.disp_w, self.disp_h),
+            interpolation=cv2.INTER_AREA,
         )
-        h, w, ch = self._rgb_array.shape
-        self._rgb_bytes = self._rgb_array.tobytes()
-        pixbuf_full = GdkPixbuf.Pixbuf.new_from_data(
-            self._rgb_bytes,
-            GdkPixbuf.Colorspace.RGB, False, 8, w, h, w * ch,
+        h, w = small_bgr.shape[:2]
+        # Adiciona canal alpha (ignorado por RGB24 mas exigido pelo formato).
+        bgra = np.zeros((h, w, 4), dtype=np.uint8)
+        bgra[:, :, 0:3] = small_bgr  # B, G, R copiados direto
+        # bgra[:, :, 3] permanece zero, ignorado em RGB24
+        self._surface_data = np.ascontiguousarray(bgra)
+        self._surface = cairo.ImageSurface.create_for_data(
+            memoryview(self._surface_data),
+            cairo.FORMAT_RGB24, w, h, w * 4,
         )
-        self._pixbuf = pixbuf_full.scale_simple(
-            self.disp_w, self.disp_h, GdkPixbuf.InterpType.BILINEAR,
-        )
-        # Mantem refs ao pixbuf nao-escalado e seu buffer ate o fim da
-        # janela, garantindo que o scale_simple e o draw consigam ler.
-        self._pixbuf_full = pixbuf_full
 
     def _build_ui(self):
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -353,8 +359,8 @@ class CorrectionWindow:
 
     def _on_draw(self, widget, cr):
         """Renderiza a imagem e sobrepoe os simbolos via Cairo."""
-        # Desenha a imagem.
-        Gdk.cairo_set_source_pixbuf(cr, self._pixbuf, 0, 0)
+        # Desenha a imagem via ImageSurface direto.
+        cr.set_source_surface(self._surface, 0, 0)
         cr.paint()
 
         # Calcula tamanho da fonte.
