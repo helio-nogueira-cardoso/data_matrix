@@ -23,30 +23,15 @@ jobs:
           - os: ubuntu-latest
             label: linux-x86_64
             platform_suffix: linux-x86_64
-            shell: bash
-            python_bin: python
-            ext: ""
           - os: macos-latest
             label: macos-arm64
             platform_suffix: macos-arm64
-            shell: bash
-            python_bin: python
-            ext: ""
           - os: macos-13
             label: macos-x86_64
             platform_suffix: macos-x86_64
-            shell: bash
-            python_bin: python
-            ext: ""
           - os: windows-latest
             label: windows-x86_64
             platform_suffix: windows-x86_64
-            # Tudo no Windows roda dentro do shell MSYS2 MinGW64, ativo
-            # apos o step setup-msys2. Steps comuns (install deps, build,
-            # package) declaram shell: ${{ matrix.shell }} para herdar.
-            shell: "msys2 {0}"
-            python_bin: python
-            ext: ".exe"
 
     steps:
       - uses: actions/checkout@v4
@@ -109,8 +94,7 @@ jobs:
           ls -l /mingw64/bin/libdmtx*.dll
 
       # =====================================================================
-      # SETUP de Python: Linux/macOS instalam o Python oficial via actions;
-      # Windows ja tem python do MSYS2 (passo anterior).
+      # SETUP de Python: Linux/macOS via actions; Windows ja tem do MSYS2.
       # =====================================================================
 
       - name: setup python (linux/macos)
@@ -119,34 +103,68 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: install python deps
-        shell: ${{ matrix.shell }}
+      - name: install python deps (linux/macos)
+        if: matrix.os != 'windows-latest'
+        shell: bash
         run: |
-          ${{ matrix.python_bin }} -m pip install --upgrade pip setuptools wheel
-          ${{ matrix.python_bin }} -m pip install --upgrade pyinstaller
-          ${{ matrix.python_bin }} -m pip install -r requirements.txt
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pyinstaller
+          python -m pip install -r requirements.txt
+
+      - name: install python deps (windows)
+        if: matrix.os == 'windows-latest'
+        shell: "msys2 {0}"
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pyinstaller
+          python -m pip install -r requirements.txt
 
       # =====================================================================
-      # BUILDS (mesmos comandos em todas as plataformas, shell por matriz)
+      # BUILDS
       # =====================================================================
 
-      - name: build pipeline (CLI)
-        shell: ${{ matrix.shell }}
+      - name: build pipeline (CLI) (linux/macos)
+        if: matrix.os != 'windows-latest'
+        shell: bash
         run: |
-          ${{ matrix.python_bin }} -m PyInstaller --clean --noconfirm pipeline.spec
+          python -m PyInstaller --clean --noconfirm pipeline.spec
           ls -la dist/
 
-      - name: build pipeline_free (CLI)
-        shell: ${{ matrix.shell }}
+      - name: build pipeline (CLI) (windows)
+        if: matrix.os == 'windows-latest'
+        shell: "msys2 {0}"
         run: |
-          ${{ matrix.python_bin }} -m PyInstaller --clean --noconfirm pipeline_free.spec
+          python -m PyInstaller --clean --noconfirm pipeline.spec
           ls -la dist/
 
-      - name: build PyAppArq (GUI)
-        shell: ${{ matrix.shell }}
+      - name: build pipeline_free (CLI) (linux/macos)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          python -m PyInstaller --clean --noconfirm pipeline_free.spec
+          ls -la dist/
+
+      - name: build pipeline_free (CLI) (windows)
+        if: matrix.os == 'windows-latest'
+        shell: "msys2 {0}"
+        run: |
+          python -m PyInstaller --clean --noconfirm pipeline_free.spec
+          ls -la dist/
+
+      - name: build PyAppArq (GUI) (linux/macos)
+        if: matrix.os != 'windows-latest'
+        shell: bash
         working-directory: PyAppArq
         run: |
-          ${{ matrix.python_bin }} -m PyInstaller --clean --noconfirm PyAppArq.spec
+          python -m PyInstaller --clean --noconfirm PyAppArq.spec
+          ls -la dist/
+
+      - name: build PyAppArq (GUI) (windows)
+        if: matrix.os == 'windows-latest'
+        shell: "msys2 {0}"
+        working-directory: PyAppArq
+        run: |
+          python -m PyInstaller --clean --noconfirm PyAppArq.spec
           ls -la dist/
 
       # =====================================================================
