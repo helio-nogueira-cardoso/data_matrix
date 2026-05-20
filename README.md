@@ -165,6 +165,201 @@ Saída do projeto:
 * `maquete_imagem.png`: imagem original.
 * `maquete_grade.txt`: grade 37×37 de símbolos, em frame de topo.
 
+## Referência de parâmetros de linha de comando
+
+Esta seção lista todos os parâmetros aceitos por `pipeline.py` e `pipeline_free.py`, agrupados por função. As flags são literais (`--nome`); quando há par mutuamente exclusivo (por exemplo, `--skip-empty` e `--no-skip-empty`), o segundo apenas reverte o primeiro.
+
+### `pipeline.py`
+
+#### Arquivos de entrada e saída
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--input` | `imagem.png` | Imagem capturada da face inferior da maquete (PNG ou outro formato suportado pelo OpenCV). |
+| `--template` | `template.png` | Gabarito do marcador de canto em cruz, usado na correlação cruzada normalizada da ortorretificação. |
+| `--output` | `ortho.png` | Caminho da imagem ortorretificada a ser gravada. |
+| `--margin` | `auto` | Margem em pixels do ortho. Default automático: teto da metade do menor passo da grade, suficiente para que toda célula, inclusive as de borda, tenha recorte de tamanho nominal. |
+| `--grid-output` | `grid.txt` | Caminho do arquivo de texto com a grade 37×37 decodificada, em frame de topo. |
+| `--dump-elements` | desligado | Quando ativo, grava cada tile recortado em disco, útil para inspeção e depuração. |
+| `--elements-dir` | `elements` | Diretório onde os tiles são gravados quando `--dump-elements` está ativo. |
+
+#### Decodificação e pré-processamento
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--decode-timeout` | `60` | Tempo limite em milissegundos por tentativa de decodificação na `pylibdmtx`. Tiles saudáveis decodificam em menos de 30 ms; o valor cobre tiles limítrofes sob contenção de CPU. |
+| `--decode-shrink` | `2` | Fator de redução interna do decodificador. Faz a `pylibdmtx` subamostrar a célula antes da leitura, economizando tempo em símbolos que toleram menor resolução. |
+| `--decode-border` | `10` | Largura em pixels da borda branca artificial adicionada ao redor de cada recorte, simulando a quiet zone exigida pelo padrão ISO/IEC 16022. |
+| `--resize-factor` | `2.0` | Fator de ampliação aplicado à célula antes do pré-processamento, aumentando a resolução efetiva dos módulos do DataMatrix e facilitando a binarização. |
+| `--use-edge-bounds` | desligado | Restringe o tamanho esperado do símbolo no decoder, reduzindo falsos positivos em tiles ruidosos ao custo de uma faixa menor de tolerância. |
+
+#### Paralelismo
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--workers` | `max(1, N_cpu - 1)` | Número de processos paralelos para decodificação das células. Por padrão, deixa um núcleo livre para o sistema operacional. |
+| `--chunksize` | `64` | Quantas células cada worker recebe por vez. Valores maiores reduzem o custo de comunicação entre processos quando o total de células é grande. |
+
+#### Descarte heurístico de células vazias
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--skip-empty` / `--no-skip-empty` | `--no-skip-empty` | Pula a decodificação de tiles que parecem vazios pelos limiares estatísticos abaixo. Desligado por padrão para preservar `recall` em pinos translúcidos de baixíssimo contraste. |
+| `--empty-std-threshold` | `7.0` | Desvio-padrão mínimo dos níveis de cinza para o tile ser considerado não vazio. |
+| `--empty-dark-threshold` | `0.06` | Proporção mínima de pixels escuros para o tile ser considerado não vazio. |
+
+#### Realinhamento da caixa de cada célula
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--refine-cells` / `--no-refine-cells` | `--no-refine-cells` | Quando ativo, transladada a caixa de toda célula para centralizar o componente conexo escuro mais próximo, antes do pré-processamento. Desligado por padrão pois pode atrapalhar tiles já bem centralizados. |
+| `--refine-max-shift` | `0` | Deslocamento máximo em pixels para o realinhamento. Zero indica modo automático, proporcional ao passo da grade. |
+| `--refine-fallback` / `--no-refine-fallback` | `--refine-fallback` | Aplica o realinhamento apenas em células que ficaram vazias após a primeira passada, recuperando símbolos fisicamente deslocados sem prejudicar tiles bem centralizados. |
+
+#### Heatmap fallback (opt-in)
+
+Aplica a proposição global do `pipeline_free.py` às células remanescentes. Útil em imagens com marcadores fora do regime padrão.
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--heatmap-fallback` / `--no-heatmap-fallback` | `--no-heatmap-fallback` | Ativa o fallback global. |
+| `--heatmap-search-radius-factor` | `0.75` | Fração do passo da grade que define o raio de busca de picos do heatmap por célula. |
+| `--heatmap-min-score` | `70` | Pontuação mínima (escala 0 a 255) para um pico ser considerado candidato. |
+| `--heatmap-num-peaks` | `4` | Número máximo de picos testados por célula no fallback. |
+
+#### Modo de depuração de uma célula
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--test-cell` | desligado | Roda o pipeline em uma única célula, no formato `linha,coluna`. Útil para investigar comportamento de uma posição específica da grade. |
+| `--test-cell-dir` | `debug_cell` | Diretório onde os intermediários da célula testada são gravados. |
+
+### `pipeline_free.py`
+
+#### Arquivos de entrada e saída
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--input` | `imagem.png` | Imagem capturada da face inferior da maquete. |
+| `--template` | `template.png` | Gabarito do marcador de canto em cruz. |
+| `--output` | `ortho.png` | Caminho da imagem ortorretificada. |
+| `--margin` | `auto` | Margem em pixels do ortho (mesmo cálculo automático do pipeline com grade). |
+| `--results-json` | `symbols.json` | Caminho do arquivo JSON com a lista de detecções (texto, caixa, centro, número de votos). |
+| `--annotated-output` | `annotated.png` | Ortho com retângulos sobrepostos sobre cada detecção, para inspeção visual. |
+
+#### Depuração
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--dump-candidates` | desligado | Quando ativo, grava cada região candidata antes da decodificação. |
+| `--candidates-dir` | `candidates` | Diretório onde os candidatos são gravados. |
+
+#### Decodificação e pré-processamento
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--decode-timeout` | `80` | Tempo limite em milissegundos por tentativa de decodificação. Default mais alto que o do pipeline com grade porque a abordagem livre processa menos tiles mas com maior variabilidade. |
+| `--decode-shrink` | `2` | Fator de redução interna do decodificador. |
+| `--decode-border` | `10` | Largura em pixels da borda branca artificial (quiet zone). |
+| `--resize-factor` | `2.0` | Fator de ampliação do recorte antes do pré-processamento. |
+| `--use-edge-bounds` | desligado | Restringe o tamanho esperado do símbolo no decoder. |
+
+#### Paralelismo
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--workers` | `max(1, N_cpu - 1)` | Número de processos paralelos. |
+| `--chunksize` | `32` | Quantos candidatos cada worker recebe por vez. |
+
+#### Proposição de candidatos
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--proposal-scale` | `0.70` | Escala base aplicada na proposição via heatmap. |
+| `--proposal-scales` | `0.90` | Lista de escalas adicionais a rodar em múltiplas passagens (separadas por vírgula). A escala única perde tiles em regiões densas; uma escala extra recupera picos suprimidos por filtragem local. |
+| `--max-candidates` | `20000` | Limite superior global do número de candidatos antes da decodificação. |
+| `--max-candidates-per-family` | `200` | Limite por família de propostas (heatmap, componentes, grade nominal). |
+| `--nms-iou` | `0.30` | Limiar de interseção sobre união para a supressão não-máxima entre candidatos. |
+| `--merge-distance` | `12` | Distância em pixels entre centros para considerar duas detecções como duplicatas. |
+| `--pad` | `8` | Padding em pixels aplicado a cada caixa proposta antes do recorte para decodificação. |
+
+#### Filtros rápidos de descarte
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--skip-empty` | ativo | Descarta candidatos cuja região tem baixo desvio-padrão e baixa proporção de pixels escuros antes de chamar a `pylibdmtx`. |
+| `--empty-std-threshold` | `7.0` | Desvio-padrão mínimo para o candidato ser considerado não vazio. |
+| `--empty-dark-threshold` | `0.05` | Proporção mínima de pixels escuros para o candidato ser considerado não vazio. |
+| `--min-local-dark-ratio` | `0.025` | Proporção mínima de pixels escuros em uma janela local ao redor do candidato. |
+
+#### Padding da borda do ortho
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--edge-pad` | `80` | Largura em pixels do padding com `BORDER_REPLICATE` adicionado à imagem ortorretificada antes da proposição. Garante quiet zone para símbolos colados nas bordas. |
+
+#### Escala típica do símbolo
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--rows` | `37` | Número de linhas da grade idealizada usada como referência de escala e na proposta via grade nominal. |
+| `--cols` | `37` | Número de colunas da grade idealizada. |
+
+#### Parâmetros do mapa de contraste local
+
+| Parâmetro | Default | Descrição |
+|-----------|---------|-----------|
+| `--window-size-ratios` | `0.70,0.90,1.10` | Lista de razões (separadas por vírgula) entre o tamanho da janela do heatmap e o lado nominal de um símbolo. Múltiplas janelas cobrem variações de escala. |
+| `--heatmap-threshold` | `0.10` | Pontuação mínima (normalizada) do mapa de contraste para a região ser considerada candidata. |
+| `--stride-ratio` | `0.35` | Passo de varredura do heatmap, como fração do lado típico do símbolo. |
+
+### Exemplos de uso comuns
+
+Execução padrão do pipeline com grade:
+
+```bash
+python pipeline.py \
+  --input imagem.png \
+  --template template.png \
+  --output ortho.png \
+  --grid-output grid.txt
+```
+
+Pipeline com grade economizando tempo em fundos uniformes (ative com cautela em maquetes com pinos translúcidos):
+
+```bash
+python pipeline.py --input imagem.png --skip-empty
+```
+
+Pipeline com grade em modo de inspeção de uma célula isolada:
+
+```bash
+python pipeline.py --input imagem.png --test-cell 10,12 --test-cell-dir ./debug
+```
+
+Execução padrão do pipeline sem grade fixa:
+
+```bash
+python pipeline_free.py \
+  --input imagem.png \
+  --template template.png \
+  --output ortho.png \
+  --results-json symbols.json \
+  --annotated-output annotated.png
+```
+
+Pipeline sem grade com proposição mais agressiva em imagens densas:
+
+```bash
+python pipeline_free.py --input imagem.png --proposal-scales "0.80,0.90,1.00"
+```
+
+Pipeline sem grade gravando os candidatos para auditoria:
+
+```bash
+python pipeline_free.py --input imagem.png --dump-candidates --candidates-dir ./cands
+```
+
 ## Validação contra gabarito
 
 O script `tests/validate_baseline.py` é o ponto único de verificação dos pipelines contra um gabarito de referência. Lê `tests/expected_baseline.json`, roda cada pipeline em subprocesso e compara o multiset de letras decodificadas com o esperado.
