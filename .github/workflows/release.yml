@@ -127,9 +127,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: "msys2 {0}"
         run: |
+          # numpy, opencv-python e Pillow ja vem do MSYS2 (mingw-w64-x86_64-*).
+          # So instalamos via pip o que o MSYS2 nao traz: pyinstaller e
+          # pylibdmtx. Evita o pip de tentar recompilar numpy do zero
+          # (build de ninja falha em MinGW).
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install --upgrade pyinstaller
-          python -m pip install -r requirements.txt
+          python -m pip install --upgrade pyinstaller pylibdmtx
 
       # =====================================================================
       # BUILDS
