@@ -9,10 +9,6 @@ on:
 permissions:
   contents: write
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   # ---------------------------------------------------------------------------
   # Job 1: build dos 3 binarios em cada uma das 4 plataformas.
@@ -28,25 +24,40 @@ jobs:
             label: linux-x86_64
             platform_suffix: linux-x86_64
             shell: bash
+            python_bin: python
+            ext: ""
           - os: macos-latest
             label: macos-arm64
             platform_suffix: macos-arm64
             shell: bash
+            python_bin: python
+            ext: ""
           - os: macos-13
             label: macos-x86_64
             platform_suffix: macos-x86_64
             shell: bash
+            python_bin: python
+            ext: ""
           - os: windows-latest
             label: windows-x86_64
             platform_suffix: windows-x86_64
-            shell: 'msys2 {0}'
+            # Tudo no Windows roda dentro do shell MSYS2 MinGW64, ativo
+            # apos o step setup-msys2. Steps comuns (install deps, build,
+            # package) declaram shell: ${{ matrix.shell }} para herdar.
+            shell: "msys2 {0}"
+            python_bin: python
+            ext: ".exe"
 
     steps:
       - uses: actions/checkout@v4
 
-      # ----- Linux setup -----
+      # =====================================================================
+      # SETUP por plataforma
+      # =====================================================================
+
       - name: linux | system deps
         if: matrix.os == 'ubuntu-latest'
+        shell: bash
         run: |
           sudo apt-get update
           LIBDMTX=$(apt-cache search '^libdmtx0' | awk '{print $1}' | head -1)
@@ -55,17 +66,13 @@ jobs:
             "$LIBDMTX" libdmtx-dev \
             python3-gi python3-gi-cairo gir1.2-gtk-3.0
 
-      # ----- macOS setup -----
       - name: macos | system deps
         if: startsWith(matrix.os, 'macos')
+        shell: bash
         run: |
           brew update
           brew install libdmtx gtk+3 pygobject3 pkg-config
 
-      # ----- Windows setup via MSYS2 -----
-      # GTK3 + PyGObject + libdmtx em Windows requerem o ambiente MinGW64
-      # do MSYS2. Build, instalacao e execucao do PyInstaller acontecem
-      # todos dentro do shell msys2 {0} (default desta plataforma).
       - name: windows | setup msys2
         if: matrix.os == 'windows-latest'
         uses: msys2/setup-msys2@v2
@@ -75,6 +82,9 @@ jobs:
           install: >-
             git
             base-devel
+            autoconf
+            automake
+            libtool
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-python
             mingw-w64-x86_64-python-pip
@@ -86,20 +96,23 @@ jobs:
 
       - name: windows | build libdmtx from source
         if: matrix.os == 'windows-latest'
+        shell: "msys2 {0}"
         run: |
           set -e
           cd /tmp
           git clone --depth 1 https://github.com/dmtx/libdmtx.git
           cd libdmtx
-          # Toolchain MinGW: autoreconf -> configure -> make
           autoreconf -fiv
           ./configure --prefix=/mingw64 --disable-static --enable-shared
           make -j$(nproc)
           make install
-          # Confirma que o DLL aparece no PATH do MinGW
           ls -l /mingw64/bin/libdmtx*.dll
 
-      # ----- Python deps (todas plataformas) -----
+      # =====================================================================
+      # SETUP de Python: Linux/macOS instalam o Python oficial via actions;
+      # Windows ja tem python do MSYS2 (passo anterior).
+      # =====================================================================
+
       - name: setup python (linux/macos)
         if: matrix.os != 'windows-latest'
         uses: actions/setup-python@v5
@@ -107,60 +120,68 @@ jobs:
           python-version: "3.11"
 
       - name: install python deps
+        shell: ${{ matrix.shell }}
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          pip install --upgrade pyinstaller
-          pip install -r requirements.txt
+          ${{ matrix.python_bin }} -m pip install --upgrade pip setuptools wheel
+          ${{ matrix.python_bin }} -m pip install --upgrade pyinstaller
+          ${{ matrix.python_bin }} -m pip install -r requirements.txt
 
-      # ----- Builds (specs) -----
+      # =====================================================================
+      # BUILDS (mesmos comandos em todas as plataformas, shell por matriz)
+      # =====================================================================
+
       - name: build pipeline (CLI)
+        shell: ${{ matrix.shell }}
         run: |
-          pyinstaller --clean --noconfirm pipeline.spec
+          ${{ matrix.python_bin }} -m PyInstaller --clean --noconfirm pipeline.spec
           ls -la dist/
 
       - name: build pipeline_free (CLI)
+        shell: ${{ matrix.shell }}
         run: |
-          pyinstaller --clean --noconfirm pipeline_free.spec
+          ${{ matrix.python_bin }} -m PyInstaller --clean --noconfirm pipeline_free.spec
           ls -la dist/
 
       - name: build PyAppArq (GUI)
+        shell: ${{ matrix.shell }}
         working-directory: PyAppArq
         run: |
-          pyinstaller --clean --noconfirm PyAppArq.spec
+          ${{ matrix.python_bin }} -m PyInstaller --clean --noconfirm PyAppArq.spec
           ls -la dist/
 
-      # ----- Empacotar artefatos -----
+      # =====================================================================
+      # PACKAGING e UPLOAD
+      # =====================================================================
+
       - name: package artifacts (linux)
         if: matrix.os == 'ubuntu-latest'
+        shell: bash
         run: |
           mkdir -p out
           cp dist/pipeline       out/pipeline-${{ matrix.platform_suffix }}
           cp dist/pipeline_free  out/pipeline_free-${{ matrix.platform_suffix }}
-          # GUI: --onedir, zipar diretorio inteiro
-          cd PyAppArq/dist && zip -r ../../out/PyAppArq-${{ matrix.platform_suffix }}.zip PyAppArq
-          cd ../..
+          ( cd PyAppArq/dist && zip -r ../../out/PyAppArq-${{ matrix.platform_suffix }}.zip PyAppArq )
           ls -la out/
 
       - name: package artifacts (macos)
         if: startsWith(matrix.os, 'macos')
+        shell: bash
         run: |
           mkdir -p out
           cp dist/pipeline       out/pipeline-${{ matrix.platform_suffix }}
           cp dist/pipeline_free  out/pipeline_free-${{ matrix.platform_suffix }}
-          # GUI: bundle .app criado pelo BUNDLE() do spec
-          cd PyAppArq/dist && zip -r ../../out/PyAppArq-${{ matrix.platform_suffix }}.zip PyAppArq.app
-          cd ../..
+          ( cd PyAppArq/dist && zip -r ../../out/PyAppArq-${{ matrix.platform_suffix }}.zip PyAppArq.app )
           ls -la out/
 
       - name: package artifacts (windows)
         if: matrix.os == 'windows-latest'
+        shell: "msys2 {0}"
         run: |
+          set -e
           mkdir -p out
           cp dist/pipeline.exe      out/pipeline-${{ matrix.platform_suffix }}.exe
           cp dist/pipeline_free.exe out/pipeline_free-${{ matrix.platform_suffix }}.exe
-          # GUI: --onedir; o diretorio PyAppArq inteiro precisa ser zipado.
-          cd PyAppArq/dist && powershell -Command "Compress-Archive -Path PyAppArq -DestinationPath ..\\..\\out\\PyAppArq-${{ matrix.platform_suffix }}.zip"
-          cd ../..
+          ( cd PyAppArq/dist && zip -r ../../out/PyAppArq-${{ matrix.platform_suffix }}.zip PyAppArq )
           ls -la out/
 
       - name: upload artifacts
