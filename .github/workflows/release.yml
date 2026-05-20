@@ -110,19 +110,42 @@ jobs:
       # SETUP de Python: Linux/macOS via actions; Windows ja tem do MSYS2.
       # =====================================================================
 
-      - name: setup python (linux/macos)
-        if: matrix.os != 'windows-latest'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      # actions/setup-python@v5 cria Python isolado, sem acesso ao
+      # PyGObject do sistema. Para a GUI GTK3 funcionar, precisamos do
+      # python3 do sistema (apt em Linux, brew em macOS) com venv que
+      # herde site-packages.
 
-      - name: install python deps (linux/macos)
-        if: matrix.os != 'windows-latest'
+      - name: linux | setup python venv with system PyGObject
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install --upgrade pyinstaller
-          python -m pip install -r requirements.txt
+          # Usa python3 do apt (mesmo runtime em que python3-gi esta
+          # instalado), com venv --system-site-packages para herdar gi.
+          python3 --version
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/python -m pip install --upgrade pip setuptools wheel
+          .venv/bin/python -m pip install --upgrade pyinstaller
+          .venv/bin/python -m pip install -r requirements.txt
+          # Confirma que o modulo gi resolve para PyGObject do sistema.
+          .venv/bin/python -c "import gi; print('gi from:', gi.__file__)"
+          echo "${PWD}/.venv/bin" >> $GITHUB_PATH
+
+      - name: macos | setup python venv with system PyGObject
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        run: |
+          # Usa o python3 do brew (mesmo prefix em que pygobject3 esta
+          # instalado), nao o python do actions/setup-python.
+          PYTHON3="$(brew --prefix)/bin/python3"
+          echo "Using Python: $PYTHON3"
+          "$PYTHON3" --version
+          "$PYTHON3" -m venv --system-site-packages .venv
+          .venv/bin/python -m pip install --upgrade pip setuptools wheel
+          .venv/bin/python -m pip install --upgrade pyinstaller
+          .venv/bin/python -m pip install -r requirements.txt
+          # Confirma que o modulo gi resolve para PyGObject do brew.
+          .venv/bin/python -c "import gi; print('gi from:', gi.__file__)"
+          echo "${PWD}/.venv/bin" >> $GITHUB_PATH
 
       - name: install python deps (windows)
         if: matrix.os == 'windows-latest'
