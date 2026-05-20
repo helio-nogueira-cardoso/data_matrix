@@ -1,0 +1,199 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: build dos 3 binarios em cada uma das 4 plataformas.
+  # ---------------------------------------------------------------------------
+  build:
+    name: build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            platform_suffix: linux-x86_64
+            shell: bash
+          - os: macos-latest
+            label: macos-arm64
+            platform_suffix: macos-arm64
+            shell: bash
+          - os: macos-13
+            label: macos-x86_64
+            platform_suffix: macos-x86_64
+            shell: bash
+          - os: windows-latest
+            label: windows-x86_64
+            platform_suffix: windows-x86_64
+            shell: 'msys2 {0}'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----- Linux setup -----
+      - name: linux | system deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          LIBDMTX=$(apt-cache search '^libdmtx0' | awk '{print $1}' | head -1)
+          sudo apt-get install -y \
+            python3 python3-venv python3-pip \
+            "$LIBDMTX" libdmtx-dev \
+            python3-gi python3-gi-cairo gir1.2-gtk-3.0
+
+      # ----- macOS setup -----
+      - name: macos | system deps
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew update
+          brew install libdmtx gtk+3 pygobject3 pkg-config
+
+      # ----- Windows setup via MSYS2 -----
+      # GTK3 + PyGObject + libdmtx em Windows requerem o ambiente MinGW64
+      # do MSYS2. Build, instalacao e execucao do PyInstaller acontecem
+      # todos dentro do shell msys2 {0} (default desta plataforma).
+      - name: windows | setup msys2
+        if: matrix.os == 'windows-latest'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            base-devel
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-python-pip
+            mingw-w64-x86_64-python-gobject
+            mingw-w64-x86_64-gtk3
+            mingw-w64-x86_64-python-pillow
+            mingw-w64-x86_64-python-numpy
+            mingw-w64-x86_64-python-opencv
+
+      - name: windows | build libdmtx from source
+        if: matrix.os == 'windows-latest'
+        run: |
+          set -e
+          cd /tmp
+          git clone --depth 1 https://github.com/dmtx/libdmtx.git
+          cd libdmtx
+          # Toolchain MinGW: autoreconf -> configure -> make
+          autoreconf -fiv
+          ./configure --prefix=/mingw64 --disable-static --enable-shared
+          make -j$(nproc)
+          make install
+          # Confirma que o DLL aparece no PATH do MinGW
+          ls -l /mingw64/bin/libdmtx*.dll
+
+      # ----- Python deps (todas plataformas) -----
+      - name: setup python (linux/macos)
+        if: matrix.os != 'windows-latest'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: install python deps
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install --upgrade pyinstaller
+          pip install -r requirements.txt
+
+      # ----- Builds (specs) -----
+      - name: build pipeline (CLI)
+        run: |
+          pyinstaller --clean --noconfirm pipeline.spec
+          ls -la dist/
+
+      - name: build pipeline_free (CLI)
+        run: |
+          pyinstaller --clean --noconfirm pipeline_free.spec
+          ls -la dist/
+
+      - name: build PyAppArq (GUI)
+        working-directory: PyAppArq
+        run: |
+          pyinstaller --clean --noconfirm PyAppArq.spec
+          ls -la dist/
+
+      # ----- Empacotar artefatos -----
+      - name: package artifacts (linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p out
+          cp dist/pipeline       out/pipeline-${{ matrix.platform_suffix }}
+          cp dist/pipeline_free  out/pipeline_free-${{ matrix.platform_suffix }}
+          # GUI: --onedir, zipar diretorio inteiro
+          cd PyAppArq/dist && zip -r ../../out/PyAppArq-${{ matrix.platform_suffix }}.zip PyAppArq
+          cd ../..
+          ls -la out/
+
+      - name: package artifacts (macos)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          mkdir -p out
+          cp dist/pipeline       out/pipeline-${{ matrix.platform_suffix }}
+          cp dist/pipeline_free  out/pipeline_free-${{ matrix.platform_suffix }}
+          # GUI: bundle .app criado pelo BUNDLE() do spec
+          cd PyAppArq/dist && zip -r ../../out/PyAppArq-${{ matrix.platform_suffix }}.zip PyAppArq.app
+          cd ../..
+          ls -la out/
+
+      - name: package artifacts (windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir -p out
+          cp dist/pipeline.exe      out/pipeline-${{ matrix.platform_suffix }}.exe
+          cp dist/pipeline_free.exe out/pipeline_free-${{ matrix.platform_suffix }}.exe
+          # GUI: --onedir; o diretorio PyAppArq inteiro precisa ser zipado.
+          cd PyAppArq/dist && powershell -Command "Compress-Archive -Path PyAppArq -DestinationPath ..\\..\\out\\PyAppArq-${{ matrix.platform_suffix }}.zip"
+          cd ../..
+          ls -la out/
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform_suffix }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Job 2: coleta tudo e publica como Release no GitHub.
+  # ---------------------------------------------------------------------------
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: list collected artifacts
+        run: ls -la dist/
+
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

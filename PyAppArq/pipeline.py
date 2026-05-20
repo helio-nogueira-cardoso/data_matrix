@@ -30,11 +30,16 @@ COLS = 37
 def _find_symbols_config():
     """Procura symbols_config.json em locais usuais.
 
-    Tenta primeiro o diretorio deste arquivo, depois sobe um nivel para
-    ECC200Decode/. Devolve None se nenhum encontrado.
+    Em desenvolvimento: tenta o diretorio deste arquivo, depois sobe um nivel.
+    Em binario PyInstaller: tenta sys._MEIPASS. Devolve None se nada encontrar.
     """
+    import sys as _sys
     here = Path(__file__).resolve().parent
-    for cand in (here / "symbols_config.json", here.parent / "symbols_config.json"):
+    candidates = [here / "symbols_config.json", here.parent / "symbols_config.json"]
+    meipass = getattr(_sys, "_MEIPASS", None)
+    if meipass:
+        candidates.insert(0, Path(meipass) / "symbols_config.json")
+    for cand in candidates:
         if cand.exists():
             return cand
     return None
@@ -766,10 +771,15 @@ def decode_grid(ortho_bgr, margin, decode_timeout=60, decode_shrink=2,
             from argparse import Namespace
             import sys as _sys
             from pathlib import Path as _Path
-            _PARENT = _Path(__file__).resolve().parent.parent
-            if str(_PARENT) not in _sys.path:
-                _sys.path.insert(0, str(_PARENT))
-            import pipeline_free as pf
+            # Em PyInstaller, pipeline_free e empacotado como hidden-import e
+            # importa direto; em desenvolvimento, esta no diretorio pai.
+            try:
+                import pipeline_free as pf  # noqa: F401
+            except ImportError:
+                _PARENT = _Path(__file__).resolve().parent.parent
+                if str(_PARENT) not in _sys.path:
+                    _sys.path.insert(0, str(_PARENT))
+                import pipeline_free as pf
 
             _, _, bx0, by0, bx1, by1 = boxes[0]
             cell_side = max(1, min(bx1 - bx0, by1 - by0))

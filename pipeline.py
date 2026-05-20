@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
@@ -14,8 +15,15 @@ from pylibdmtx.pylibdmtx import decode
 ROWS = 37
 COLS = 37
 
+
+def _bundle_dir():
+    # Diretório de recursos embutidos: sys._MEIPASS em binário PyInstaller,
+    # diretório do .py em desenvolvimento.
+    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+
+
 # Caminho padrão do arquivo de configuração com a allowlist de símbolos.
-DEFAULT_SYMBOLS_CONFIG = Path(__file__).resolve().parent / "symbols_config.json"
+DEFAULT_SYMBOLS_CONFIG = _bundle_dir() / "symbols_config.json"
 
 
 def load_symbols_config(path=None):

@@ -45,8 +45,11 @@ class App:
     """Janela principal da aplicacao."""
 
     def __init__(self):
+        import sys as _sys
         self._image_path = None
-        self._script_dir = Path(__file__).resolve().parent
+        # Em binario PyInstaller, recursos sao extraidos em sys._MEIPASS.
+        # Em desenvolvimento, ficam ao lado deste arquivo.
+        self._script_dir = Path(getattr(_sys, "_MEIPASS", Path(__file__).resolve().parent))
         self._template_path = str(self._script_dir / "template.png")
         self._objects_path = str(self._script_dir / "objetos.json")
 
