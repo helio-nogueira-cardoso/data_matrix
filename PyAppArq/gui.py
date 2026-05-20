@@ -284,15 +284,28 @@ class CorrectionWindow:
         self._build_ui()
 
     def _prepare_pixbuf(self):
-        """Converte a ortho BGR para GdkPixbuf na escala de exibicao."""
-        rgb = cv2.cvtColor(self.ortho_bgr, cv2.COLOR_BGR2RGB)
-        h, w, ch = rgb.shape
-        pixbuf = GdkPixbuf.Pixbuf.new_from_data(
-            rgb.tobytes(), GdkPixbuf.Colorspace.RGB, False, 8, w, h, w * ch,
+        """Converte a ortho BGR para GdkPixbuf na escala de exibicao.
+
+        GdkPixbuf.new_from_data NAO copia os bytes; mantem ponteiro para
+        o buffer externo. Se o bytes for coletado pelo GC antes do pixbuf
+        ser desenhado, o DrawingArea renderiza vazio. Mantemos referencias
+        explicitas a rgb (numpy array contiguo) e ao bytes em self._.
+        """
+        self._rgb_array = np.ascontiguousarray(
+            cv2.cvtColor(self.ortho_bgr, cv2.COLOR_BGR2RGB)
         )
-        self._pixbuf = pixbuf.scale_simple(
+        h, w, ch = self._rgb_array.shape
+        self._rgb_bytes = self._rgb_array.tobytes()
+        pixbuf_full = GdkPixbuf.Pixbuf.new_from_data(
+            self._rgb_bytes,
+            GdkPixbuf.Colorspace.RGB, False, 8, w, h, w * ch,
+        )
+        self._pixbuf = pixbuf_full.scale_simple(
             self.disp_w, self.disp_h, GdkPixbuf.InterpType.BILINEAR,
         )
+        # Mantem refs ao pixbuf nao-escalado e seu buffer ate o fim da
+        # janela, garantindo que o scale_simple e o draw consigam ler.
+        self._pixbuf_full = pixbuf_full
 
     def _build_ui(self):
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
