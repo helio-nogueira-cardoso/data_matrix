@@ -87,15 +87,21 @@ jobs:
           cd /tmp
           git clone --depth 1 https://github.com/dmtx/libdmtx.git
           cd libdmtx
-          # MinGW exige -no-undefined para criar shared library (DLL). A
-          # libdmtx upstream nao declara, entao injetamos antes do autoreconf.
-          if ! grep -q "no-undefined" Makefile.am; then
-            sed -i 's/^libdmtx_la_LDFLAGS\s*=.*/& -no-undefined/' Makefile.am
-            grep "libdmtx_la_LDFLAGS" Makefile.am || true
-          fi
+          # MinGW exige -no-undefined em libtool para criar DLL.
+          # A libdmtx upstream nao declara isso, entao patcheamos todo
+          # Makefile.am que define libdmtx_la_LDFLAGS, adicionando a flag.
+          echo "Localizando Makefile.am com libdmtx_la_LDFLAGS:"
+          grep -lR "libdmtx_la_LDFLAGS" --include=Makefile.am || true
+          find . -name "Makefile.am" -exec sed -i \
+            's/^libdmtx_la_LDFLAGS\s*=\(.*\)/libdmtx_la_LDFLAGS =\1 -no-undefined/' {} \;
+          echo "Apos patch:"
+          grep -R "libdmtx_la_LDFLAGS" --include=Makefile.am || true
           autoreconf -fiv
           ./configure --prefix=/mingw64 --disable-static --enable-shared
-          make -j$(nproc)
+          # Rede de seguranca: tambem injeta a flag via variavel automake
+          # passada na linha de comando do make, para o caso de o patch nao
+          # ter pegado todas as targets.
+          make -j$(nproc) AM_LDFLAGS="-no-undefined"
           make install
           ls -l /mingw64/bin/libdmtx*.dll
 
