@@ -26,9 +26,6 @@ jobs:
           - os: macos-latest
             label: macos-arm64
             platform_suffix: macos-arm64
-          - os: macos-13
-            label: macos-x86_64
-            platform_suffix: macos-x86_64
           - os: windows-latest
             label: windows-x86_64
             platform_suffix: windows-x86_64
