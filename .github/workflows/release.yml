@@ -20,13 +20,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-latest-large
             label: linux-x86_64
             platform_suffix: linux-x86_64
-          - os: macos-latest
+          - os: macos-latest-large
             label: macos-arm64
             platform_suffix: macos-arm64
-          - os: windows-latest
+          - os: windows-latest-large
             label: windows-x86_64
             platform_suffix: windows-x86_64
 
