@@ -43,10 +43,26 @@ hiddenimports = [
 
 block_cipher = None
 
+# No Windows (MSYS2/MinGW), libdmtx-64.dll depende de runtimes do MinGW
+# que o PyInstaller nao detecta sozinho. Sem isso, o exe falha com
+# "Could not find module 'libdmtx-64.dll' (or one of its dependencies)".
+binaries = []
+if sys.platform.startswith("win"):
+    mingw_bin = Path(os.environ.get("MINGW_PREFIX", "/mingw64")) / "bin"
+    for dll in (
+        "libgcc_s_seh-1.dll",
+        "libwinpthread-1.dll",
+        "libstdc++-6.dll",
+        "libdmtx-0.dll",
+    ):
+        src = mingw_bin / dll
+        if src.exists():
+            binaries.append((str(src), "."))
+
 a = Analysis(
     ["main.py"],
     pathex=[str(HERE), str(ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

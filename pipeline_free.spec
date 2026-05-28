@@ -1,9 +1,25 @@
 # PyInstaller spec — entrypoint CLI pipeline_free.py (sem grade fixa).
 # Roda da raiz do repo: pyinstaller pipeline_free.spec
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(os.path.abspath(SPECPATH))
+
+# No Windows (MSYS2/MinGW), libdmtx-0.dll depende de runtimes do MinGW
+# que o PyInstaller nao detecta sozinho.
+binaries = []
+if sys.platform.startswith("win"):
+    mingw_bin = Path(os.environ.get("MINGW_PREFIX", "/mingw64")) / "bin"
+    for dll in (
+        "libgcc_s_seh-1.dll",
+        "libwinpthread-1.dll",
+        "libstdc++-6.dll",
+        "libdmtx-0.dll",
+    ):
+        src = mingw_bin / dll
+        if src.exists():
+            binaries.append((str(src), "."))
 
 # pipeline_free.py nao depende de symbols_config.json em runtime, mas
 # inclui-lo no bundle nao machuca (alguns codepaths futuros podem usar).
@@ -20,7 +36,7 @@ block_cipher = None
 a = Analysis(
     ["pipeline_free.py"],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
