@@ -20,7 +20,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # ubuntu-20.04 = glibc 2.31. Cobre Mint 20+, Debian 11+, Ubuntu 20.04+.
+          # Combinado com staticx nos CLIs onefile abaixo, esses ficam glibc-free.
+          - os: ubuntu-20.04
             label: linux-x86_64
             platform_suffix: linux-x86_64
           - os: macos-latest
@@ -40,7 +42,7 @@ jobs:
       # =====================================================================
 
       - name: linux | system deps
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-20.04'
         shell: bash
         run: |
           sudo apt-get update
@@ -115,7 +117,7 @@ jobs:
       # herde site-packages.
 
       - name: linux | setup python venv with system PyGObject
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-20.04'
         shell: bash
         run: |
           # Usa python3 do apt (mesmo runtime em que python3-gi esta
@@ -206,11 +208,32 @@ jobs:
           ls -la dist/
 
       # =====================================================================
+      # STATICX (linux only): bundla glibc/loader nos CLIs onefile, deixando
+      # eles totalmente portaveis (rodam em qualquer Linux x86_64, qualquer
+      # glibc). Nao aplicamos no PyAppArq porque ele eh --onedir + GTK3:
+      # staticx-ar uma arvore de .so do GTK em onefile quebra schemas/typelibs.
+      # PyAppArq ja se beneficia do ubuntu-20.04 (glibc 2.31, cobre Mint 20+).
+      # =====================================================================
+
+      - name: linux | staticx CLIs (pipeline, pipeline_free)
+        if: matrix.os == 'ubuntu-20.04'
+        shell: bash
+        run: |
+          sudo apt-get install -y patchelf
+          .venv/bin/python -m pip install staticx
+          .venv/bin/staticx dist/pipeline      dist/pipeline-static
+          .venv/bin/staticx dist/pipeline_free dist/pipeline_free-static
+          mv dist/pipeline-static      dist/pipeline
+          mv dist/pipeline_free-static dist/pipeline_free
+          ls -la dist/
+          file dist/pipeline dist/pipeline_free
+
+      # =====================================================================
       # PACKAGING e UPLOAD
       # =====================================================================
 
       - name: package artifacts (linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-20.04'
         shell: bash
         run: |
           mkdir -p out
