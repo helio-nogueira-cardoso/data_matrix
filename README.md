@@ -498,3 +498,7 @@ Maquete física
 ## Autor
 
 Hélio Nogueira Cardoso
+
+## Licença
+
+Este projeto é distribuído sob a licença MIT. Consulte o arquivo [LICENSE](LICENSE) para o texto completo.
